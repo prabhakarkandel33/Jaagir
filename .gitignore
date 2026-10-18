@@ -1,0 +1,44 @@
+# --- Python / uv ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.python-version
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Django ---
+media/
+staticfiles/
+
+# --- Node / React ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- Env / secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Build / OS / editor ---
+build/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# --- OpenCode runtime cache (keep skills) ---
+.opencode/node_modules/
+.opencode/package-lock.json
+
+# Skills are provided by the environment, not vendored into the repo.
+.opencode/skills/

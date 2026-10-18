@@ -1,0 +1,17 @@
+[project]
+name = "contracts"
+version = "0.1.0"
+description = "Shared event contract: envelope, payload schemas and topic names. No runtime logic."
+requires-python = ">=3.12,<3.13"
+dependencies = ["pydantic>=2.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/contracts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

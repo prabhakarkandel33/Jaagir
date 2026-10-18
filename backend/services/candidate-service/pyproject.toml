@@ -1,0 +1,28 @@
+[project]
+name = "candidate-service"
+version = "0.1.0"
+description = "Candidate & Application Service: candidates, applications, job replica."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "contracts",
+  "django>=5.2,<6",
+  "djangorestframework>=3.15",
+  "drf-spectacular>=0.27",
+  "django-cors-headers>=4.4",
+  "djangorestframework-simplejwt>=5.3",
+  "argon2-cffi>=23.1",
+  "psycopg[binary]>=3.2",
+  "pydantic-settings>=2.5",
+  "confluent-kafka>=2.5",
+  "gunicorn>=23",
+]
+
+# Run in place (see job-service/pyproject.toml for the reason).
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Job Service API
+  version: 0.1.0
+  description: Recruiters, jobs and the outbox. Owns job_db.
+paths:
+  /healthz:
+    get:
+      operationId: healthz_retrieve
+      description: Liveness probe. Always 200 while the process is up.
+      tags:
+      - healthz
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /readyz:
+    get:
+      operationId: readyz_retrieve
+      description: Readiness probe. Fails only when the database is down. Kafka is
+        reported but never fails readiness.
+      tags:
+      - readyz
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+components:
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

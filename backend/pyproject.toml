@@ -1,0 +1,65 @@
+[project]
+name = "jobportal-workspace"
+version = "0.0.0"
+description = "Job Portal backend workspace (two Django services + shared contracts)."
+requires-python = ">=3.12,<3.13"
+
+# Virtual root: this package is not built, it only ties the workspace together.
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.uv.sources]
+contracts = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-django>=4.9",
+  "django>=5.2,<6",
+  "django-stubs>=5.1,<6",
+  "types-requests",
+]
+
+# ---------------------------------------------------------------------------
+# ruff (lint + format). Line length 100, matches .editorconfig.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages", "services"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ", "S", "C4", "SIM", "RUF"]
+ignore = [
+  "E501",   # line length handled by the formatter
+  "S101",   # assert is fine in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
+"**/tests/**" = ["S101", "S105", "S106"]
+"**/config/settings/*.py" = ["E402", "F401", "F403", "F405"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "contracts", "apps"]
+
+# ---------------------------------------------------------------------------
+# mypy (typecheck). Pragmatic baseline; each service tightens via its own config.
+# NOTE: the django-stubs plugin needs one settings module, so it is NOT enabled
+# at the workspace root. Enable it inside a service when that service is typed.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["contracts.*"]
+ignore_errors = false
