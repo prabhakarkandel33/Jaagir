@@ -5,7 +5,8 @@
 param(
     [Parameter(Position = 0)]
     [string]$Target = 'help',
-    [int]$N = 100000
+    [int]$N = 100000,
+    [switch]$Build
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +16,7 @@ $Job       = "$Backend/services/job-service"
 $Cand      = "$Backend/services/candidate-service"
 $Contracts = "$Backend/packages/contracts"
 $Compose   = 'deploy/docker-compose.dev.yml'
+$ComposeFull = 'deploy/docker-compose.dev-full.yml'
 
 function Invoke-In {
     param([string]$Dir, [scriptblock]$Block)
@@ -26,6 +28,9 @@ function Write-Help {
     @'
 targets:
   infra-up / infra-down   kafka + 2 postgres (deploy/docker-compose.dev.yml)
+  stack-up                whole stack in docker: infra + 2 services + relay + consumer
+  stack-down / stack-logs stack lifecycle ('stack-up -Build' rebuilds images)
+  stack-ps                container status of the full stack
   sync                    uv sync --all-packages
   migrate                 migrate both DBs independently
   dev                     run both services (watch mode)
@@ -43,6 +48,13 @@ switch ($Target) {
     'sync' { Invoke-In $Backend { uv sync --all-packages } }
     'infra-up' { docker compose -f $Compose up -d --wait }
     'infra-down' { docker compose -f $Compose down }
+    'stack-up' {
+        if ($Build) { docker compose -f $ComposeFull up -d --build --wait }
+        else { docker compose -f $ComposeFull up -d --wait }
+    }
+    'stack-down' { docker compose -f $ComposeFull down }
+    'stack-logs' { docker compose -f $ComposeFull logs -f }
+    'stack-ps' { docker compose -f $ComposeFull ps }
     'migrate' {
         Invoke-In $Job  { uv run python manage.py migrate }
         Invoke-In $Cand { uv run python manage.py migrate }

@@ -6,14 +6,19 @@ JOB      := $(BACKEND)/services/job-service
 CAND     := $(BACKEND)/services/candidate-service
 CONTRACTS:= $(BACKEND)/packages/contracts
 COMPOSE  := docker compose -f deploy/docker-compose.dev.yml
+COMPOSE_FULL := docker compose -f deploy/docker-compose.dev-full.yml
 N        ?= 100000
+BUILD    ?=
 
-.PHONY: help sync infra-up infra-down migrate dev dev-job dev-candidate \
+.PHONY: help sync infra-up infra-down stack-up stack-down stack-logs stack-ps \
+        migrate dev dev-job dev-candidate \
         lint typecheck test verify openapi seed explain e2e prod-local
 
 help:
 	@echo "targets:"
 	@echo "  infra-up / infra-down   kafka + 2 postgres (deploy/docker-compose.dev.yml)"
+	@echo "  stack-up                whole stack in docker (BUILD=1 to rebuild images)"
+	@echo "  stack-down / stack-logs / stack-ps"
 	@echo "  sync                    uv sync --all-packages"
 	@echo "  migrate                 migrate both DBs independently"
 	@echo "  dev                     run both services (watch mode)"
@@ -32,6 +37,18 @@ infra-up:
 
 infra-down:
 	$(COMPOSE) down
+
+stack-up:
+	$(COMPOSE_FULL) up -d --wait $(if $(BUILD),--build,)
+
+stack-down:
+	$(COMPOSE_FULL) down
+
+stack-logs:
+	$(COMPOSE_FULL) logs -f
+
+stack-ps:
+	$(COMPOSE_FULL) ps
 
 migrate:
 	cd $(JOB) && uv run python manage.py migrate

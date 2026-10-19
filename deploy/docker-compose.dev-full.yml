@@ -1,0 +1,159 @@
+# FULL local stack: infrastructure + both Django services + background workers.
+#
+#   docker compose -f deploy/docker-compose.dev-full.yml up --build
+#   docker compose -f deploy/docker-compose.dev-full.yml logs -f
+#   docker compose -f deploy/docker-compose.dev-full.yml down
+#
+# Infrastructure (kafka, job-db, candidate-db) is INCLUDED from
+# docker-compose.dev.yml, so there is one copy of those definitions and the
+# containers/volumes are shared with `make infra-up` / `tasks.ps1 infra-up`.
+#
+# The services build ONE shared image (backend/Dockerfile.dev) and bind-mount
+# their source, so an edit on the host reloads without a rebuild. Rebuild only
+# when a dependency changes (`pyproject.toml` / `uv.lock`).
+#
+# Source over the host `.env` files: each service still reads its own `.env`
+# through the bind mount, and the `environment:` blocks below override only the
+# container-network addresses (the host `.env` points at localhost).
+#
+# This file is for local development. Production images, Caddy, and the one-shot
+# migration flow behind a health gate are M7 (see ARCHITECTURE.md section 10).
+name: jobportal-dev
+
+include:
+  - docker-compose.dev.yml
+
+x-job-image: &job-image
+  build:
+    context: ../backend
+    dockerfile: Dockerfile.dev
+
+x-service-env: &service-env
+  PYTHONUNBUFFERED: "1"
+
+services:
+  job-migrate:
+    <<: *job-image
+    container_name: jobportal-job-migrate
+    working_dir: /app/services/job-service
+    command: ["uv", "run", "python", "manage.py", "migrate", "--noinput"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@job-db:5432/job_db
+    volumes:
+      - ../backend/services/job-service:/app/services/job-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      job-db:
+        condition: service_healthy
+
+  candidate-migrate:
+    <<: *job-image
+    container_name: jobportal-candidate-migrate
+    working_dir: /app/services/candidate-service
+    command: ["uv", "run", "python", "manage.py", "migrate", "--noinput"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@candidate-db:5432/candidate_db
+    volumes:
+      - ../backend/services/candidate-service:/app/services/candidate-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      candidate-db:
+        condition: service_healthy
+
+  job-web:
+    <<: *job-image
+    container_name: jobportal-job-web
+    working_dir: /app/services/job-service
+    command: ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:3001"]
+    ports:
+      - "3001:3001"
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@job-db:5432/job_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    volumes:
+      - ../backend/services/job-service:/app/services/job-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      job-migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3001/healthz', timeout=2).status==200 else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  job-relay:
+    <<: *job-image
+    container_name: jobportal-job-relay
+    working_dir: /app/services/job-service
+    command: ["uv", "run", "python", "manage.py", "run_relay"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@job-db:5432/job_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      OUTBOX_RELAY_ENABLED: "true"
+    volumes:
+      - ../backend/services/job-service:/app/services/job-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      job-migrate:
+        condition: service_completed_successfully
+
+  candidate-web:
+    <<: *job-image
+    container_name: jobportal-candidate-web
+    working_dir: /app/services/candidate-service
+    command: ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:3002"]
+    ports:
+      - "3002:3002"
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@candidate-db:5432/candidate_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JOB_SERVICE_INTERNAL_URL: http://job-web:3001
+    volumes:
+      - ../backend/services/candidate-service:/app/services/candidate-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3002/healthz', timeout=2).status==200 else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  candidate-consumer:
+    <<: *job-image
+    container_name: jobportal-candidate-consumer
+    working_dir: /app/services/candidate-service
+    command: ["uv", "run", "python", "manage.py", "consume_events"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@candidate-db:5432/candidate_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_CONSUMER_ENABLED: "true"
+      JOB_SERVICE_INTERNAL_URL: http://job-web:3001
+    volumes:
+      - ../backend/services/candidate-service:/app/services/candidate-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully

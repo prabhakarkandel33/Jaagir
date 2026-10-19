@@ -1,0 +1,13 @@
+# Build context is backend/ (see deploy/docker-compose.dev-full.yml).
+# Keep the image small and keep secrets out of it (invariant I6).
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.env
+**/.env
