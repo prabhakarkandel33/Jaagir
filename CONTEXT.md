@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M2
-State             : IN PROGRESS (auth endpoints done; job commands next)
-Last session      : S3 (2026-10-19)
-Next action       : M2 job commands (create DRAFT, update, publish, close) + `withTx` + outbox insert in the same tx
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 25 + 5)
+Current milestone : M3
+State             : NOT STARTED (M2 complete)
+Last session      : S4 (2026-10-19)
+Next action       : M3 Kafka client + outbox relay (boot with Kafka down, retry, admin endpoint)
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 38 + 5)
 ```
 
-Progress: `[~] M0  [x] M1  [~] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -64,10 +64,14 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
   - [2026-10-19] Done in job-service: `apps/recruiters/models.py` (custom `AUTH_USER_MODEL`, UUID PK, lower(email) unique), `apps/jobs/models.py` (status/employment check constraints, `jobs_version_positive`), `apps/outbox/models.py` (partial index `outbox_pending_idx`). Tests in `tests/test_models.py` (9 cases) assert constraints at DB level; `uv run pytest -q` -> 14 passed.
 - [x] Recruiter register/login (argon2id, JWT signing, key from env as base64 PEM), `GET|PUT /recruiters/me`.
   - [2026-10-19] Done in job-service: `apps/recruiters/{serializers,services,views,urls}.py`, `apps/core/throttling.py` (`AuthRateThrottle`, scope `auth` = 10/min), `config/env.decode_pem` (base64 PEM decoded at boot), `SIMPLE_JWT` uses decoded keys + `USER_ID_CLAIM="sub"`. Routes: `POST /auth/recruiters/register`, `POST /auth/recruiters/login`, `GET|PUT /recruiters/me`. Tests `tests/test_auth.py` (11 cases). Live-verified over HTTP on :3001 (register 201, duplicate 409 `EMAIL_ALREADY_EXISTS`, login 200, `/me` 200, bad login 401 `INVALID_CREDENTIALS`). `spectacular --validate --fail-on-warn` -> exit 0.
-- [ ] Job commands: create (DRAFT), update, publish, close with the state machine (`DRAFT->PUBLISHED->CLOSED`; illegal transitions -> 409 `INVALID_STATE_TRANSITION`), ownership enforced (other recruiter's job -> 404), `version = version + 1` on every write.
-- [ ] `withTx(fn)` helper; publish/update-while-published/close insert an outbox row **in the same tx** (envelope from `packages/contracts`, payload = full snapshot).
-- [ ] Recruiter list with pagination; public `GET /jobs/:id` returns PUBLISHED only.
-- [ ] Uniform error format; rate-limit on auth routes; OpenAPI schemas for all routes.
+- [x] Job commands: create (DRAFT), update, publish, close with the state machine (`DRAFT->PUBLISHED->CLOSED`; illegal transitions -> 409 `INVALID_STATE_TRANSITION`), ownership enforced (other recruiter's job -> 404), `version = version + 1` on every write.
+  - [2026-10-19] Done in job-service: `apps/jobs/{serializers,services,views,urls}.py`, `apps/core/permissions.py` (`IsRecruiter` checks the token `role` claim), `apps/core/db.py` (`with_tx`). Commands lock the row (`select_for_update`) then bump `version`. Tests in `tests/test_jobs.py` (13 cases).
+- [x] `withTx(fn)` helper; publish/update-while-published/close insert an outbox row **in the same tx** (envelope from `packages/contracts`, payload = full snapshot).
+  - [2026-10-19] `apps/outbox/services.py` `enqueue_job_event` builds `EventEnvelope`/`JobSnapshot` from `contracts`; the outbox row stores the full envelope JSON. Rollback test proves no outbox row and no version change when the emitter raises.
+- [x] Recruiter list with pagination; public `GET /jobs/:id` returns PUBLISHED only.
+  - [2026-10-19] `GET /recruiter/jobs` uses `apps.core.pagination` (`{items,page,pageSize,total}`), scoped to the owner. `GET /jobs/:id` returns 404 for DRAFT and CLOSED.
+- [x] Uniform error format; rate-limit on auth routes; OpenAPI schemas for all routes.
+  - [2026-10-19] All routes documented with `@extend_schema`; `spectacular --validate --fail-on-warn` exit 0. Auth routes throttled at 10/min.
 - **Acceptance:** integration tests cover: state machine, ownership, outbox row exists with correct `aggregate_version`, **tx rollback leaves no outbox row and no job change**, draft edits emit nothing. `make verify` green.
 
 ### M3: Outbox relay and producer
@@ -189,6 +193,8 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M2] ES256/RS256 signing needs PyJWT's crypto backend: added `cryptography>=43` to `job-service` deps (was absent; tokens would raise at sign time).
 - [2026-10-19, M2] Test JWT keys: `config/settings/test.py` generates an ephemeral ES256 keypair at import and overrides `SIMPLE_JWT`, so tests never need provisioned `.env` keys. Dev keys live in the git-ignored `.env` as base64 PEM.
 - [2026-10-19, M2] PowerShell mangles inline JSON for `curl.exe` (`"` escaping). Use `--data-binary "@file.json"` with a temp file for HTTP checks instead of `-d "{...}"`.
+- [2026-10-19, M2] `uv run python manage.py runserver ... --noreload` leaves TWO processes (the `uv` parent and the `python` child). `Stop-Process` on the parent leaves the child holding port 3001, so a later server silently fails to bind and old requests hit the STALE URLconf (new routes 404). Fix: kill the actual listener pid(s) (`Get-NetTCPConnection -LocalPort 3001 -State Listen`) in a loop until none remain. Symptom to watch for: `/jobs` 404 with the Django debug page listing only the old routes.
+- [2026-10-19, M2] `IsRecruiter` must check `request.auth` (the JWT payload), not `request.user` alone; `force_authenticate` sets only `request.user`, so recruiter-route tests must send a real `Authorization: Bearer` token (helper `auth_client` uses `issue_access_token`).
 
 ---
 
@@ -199,6 +205,7 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-19, M2] The recruiter IS the Django auth user (`AUTH_USER_MODEL = recruiters.Recruiter`, `AbstractBaseUser`). Why: SimpleJWT, argon2id hashing, and `last_login` work without a second profile table. Rejected: `auth.User` + `Recruiter` profile (two tables, needless join).
 - [2026-10-19, M2] UUID primary keys use Python-side `uuid.uuid4`, not `gen_random_uuid()`. Why: no DB default needed, works in bulk tests without a round trip. Rejected: `db_default` (harder to introspect, migration noise).
 - [2026-10-19, M2] Auth endpoints return a single access token (no refresh endpoint). Why: assignment only needs login -> access token; `role`/`iss`/`sub` claims are the contract (ARCHITECTURE.md section 9). Rejected: exposing SimpleJWT refresh flow (extra surface, not required).
+- [2026-10-19, M2] The outbox `payload` column stores the **full envelope JSON** (not just the snapshot). Why: the M3 relay can send the value bytes unchanged and the headers come from the same object; the `event_type`/`aggregate_id`/`aggregate_version` columns stay for querying. Rejected: storing only the snapshot (relay would rebuild the envelope and could drift).
 
 
 - [design] Stack = Node 22/TypeScript/Fastify/raw SQL. Why: fast agent iteration, ~half the RAM of a JVM stack, full SQL control for FTS/outbox. Rejected: Spring Boot (RAM, slower iteration), ORMs (hide FTS/outbox semantics).
@@ -278,3 +285,14 @@ Template:
 - Not done / left half-way: job command endpoints (create DRAFT, update, publish, close) + state machine, `withTx`, outbox inserts on publish/update-while-published/close, recruiter list, public `GET /jobs/:id`. Dev JWT keypair generated and written to the git-ignored `.env`; `.env.example` keeps empty placeholders.
 - Gotchas/decisions added: `ApiError` must set `self.status_code` (DRF uses the instance attr, not `code`); SimpleJWT `USER_ID_CLAIM` is `user_id` by default (set to `sub`); ES256 needs `cryptography`; test settings generate an ephemeral keypair; PowerShell mangles inline curl JSON (use `--data-binary @file`); ruff RUF012 false positives in serializers/views ignored.
 - Next session should start with: M2 job commands in `apps/jobs` (serializers + services + `withTx` in the same transaction as the outbox insert), state machine `DRAFT->PUBLISHED->CLOSED`, ownership 404, `version` bump on every write, and the M2 acceptance tests (rollback leaves no outbox row and no job change; draft edits emit nothing).
+
+### Session 4: 2026-10-19: M2 (job commands) — M2 COMPLETE
+- Did: implemented the job lifecycle in job-service: `apps/jobs/{serializers,services,views,urls}.py`, `apps/core/db.py` (`with_tx`), `apps/core/permissions.py` (`IsRecruiter`), `apps/outbox/services.py` (`enqueue_job_event` builds the `contracts` envelope + full snapshot). State machine `DRAFT->PUBLISHED->CLOSED` with `select_for_update` + `version+1` per write; publish/published-update/close write the outbox row in the same transaction; draft edits emit nothing. Routes: `POST|GET /recruiter/jobs`, `GET|PUT /recruiter/jobs/:id`, `POST /recruiter/jobs/:id/publish`, `POST /recruiter/jobs/:id/close`, public `GET /jobs/:id`. Tests `tests/test_jobs.py` (13 cases).
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "78 files already formatted", mypy "Success" x3, pytest 11 + 38 + 5 passed.
+  - `uv run python manage.py spectacular --validate --fail-on-warn` -> exit 0.
+  - Live on :3001 (`curl.exe`): create 201 DRAFT v1, list 200 total=1, public draft 404, publish 200 PUBLISHED v2, double publish 409 `INVALID_STATE_TRANSITION`, edit published 200 v3, close 200 CLOSED v4, public closed 404, edit closed 409.
+  - `manage.py shell` -> outbox rows `[('JobPublished',2), ('JobUpdated',3), ('JobClosed',4)]`, all `published_at=None` (relay is M3); no row for the draft edit.
+- Not done / left half-way: M3 onward (Kafka client, relay, `/internal/admin/outbox`). Nothing half-written in M2.
+- Gotchas/decisions added: stale `runserver` processes hold port 3001 (kill the listening pid in a loop); `IsRecruiter` reads `request.auth`, so tests need a real Bearer token; outbox `payload` stores the full envelope JSON.
+- Next session should start with: M3 — `confluent-kafka` client with lazy/background connect + retry, `ensureTopics`, idempotent producer (`acks=all`, key=aggregateId), the relay loop (advisory lock, `FOR UPDATE SKIP LOCKED`, ordered, backoff, `OUTBOX_RELAY_ENABLED`), `GET /internal/admin/outbox`, `/readyz` Kafka status.

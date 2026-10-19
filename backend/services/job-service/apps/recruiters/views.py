@@ -7,11 +7,12 @@ from typing import Any
 from django.contrib.auth import authenticate
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.permissions import IsRecruiter
 from apps.core.throttling import AuthRateThrottle
 from apps.recruiters import services
 from apps.recruiters.serializers import (
@@ -85,7 +86,7 @@ class RecruiterLoginView(APIView):
 
 
 class RecruiterMeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsRecruiter]
 
     @extend_schema(
         responses={200: RecruiterSerializer},
