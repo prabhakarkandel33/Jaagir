@@ -124,3 +124,12 @@ SIMPLE_JWT = {
 }
 
 LOGGING = build_logging_config(env.log_level)
+
+# Kafka (invariant I9: never required for availability).
+KAFKA_BOOTSTRAP_SERVERS = env.kafka_bootstrap_servers
+KAFKA_MONITOR_ENABLED = env.kafka_monitor_enabled
+KAFKA_MESSAGE_TIMEOUT_MS = env.kafka_message_timeout_ms
+OUTBOX_RELAY_ENABLED = env.outbox_relay_enabled
+
+# Internal endpoints require this shared secret (invariant I8).
+INTERNAL_TOKEN = env.internal_token

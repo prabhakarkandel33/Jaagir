@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M3
-State             : NOT STARTED (M2 complete)
-Last session      : S4 (2026-10-19)
-Next action       : M3 Kafka client + outbox relay (boot with Kafka down, retry, admin endpoint)
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 38 + 5)
+Current milestone : M4
+State             : NOT STARTED (M3 complete)
+Last session      : S5 (2026-10-19)
+Next action       : M4 Candidate Service core + Kafka consumer (own DB, inbox dedup, version-guarded upsert)
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 49 + 5 = 65)
 ```
 
-Progress: `[~] M0  [x] M1  [x] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -74,13 +74,19 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
   - [2026-10-19] All routes documented with `@extend_schema`; `spectacular --validate --fail-on-warn` exit 0. Auth routes throttled at 10/min.
 - **Acceptance:** integration tests cover: state machine, ownership, outbox row exists with correct `aggregate_version`, **tx rollback leaves no outbox row and no job change**, draft edits emit nothing. `make verify` green.
 
-### M3: Outbox relay and producer
-- [ ] Kafka client module: lazy/background connect with retry; **service boots and serves HTTP with Kafka down (I9)**. `ensureTopics` (`jobs.events.v1` x3 partitions, DLQ x1) runs in the background until it succeeds.
-- [ ] Idempotent producer, `acks=-1`, key=aggregateId, headers per ARCHITECTURE §5.
-- [ ] Relay loop per §6.1 (advisory lock, `FOR UPDATE SKIP LOCKED`, ordered, backoff capped at 30 s, stops batch on first failure, `OUTBOX_RELAY_ENABLED` flag, graceful stop).
-- [ ] `GET /internal/admin/outbox` (+ `X-Internal-Token` guard); `/readyz` reports `kafka: up|degraded` without failing readiness.
-- [ ] Tests: (a) happy path: published event arrives on topic with valid envelope; (b) producer failing -> rows pending, API still 2xx, `attempts` grows; (c) recovery -> backlog drained **in order**; (d) crash-between-ack-and-mark simulation -> duplicate delivery is possible and acceptable (assert same `eventId`).
+### M3: Outbox relay and producer — M3 COMPLETE
+- [x] Kafka client module: lazy/background connect with retry; **service boots and serves HTTP with Kafka down (I9)**. `ensureTopics` (`jobs.events.v1` x3 partitions, DLQ x1) runs in the background until it succeeds.
+  - [2026-10-19] Done in job-service: `apps/core/kafka.py` (`KafkaClient` with `status: unknown|up|degraded`, `ensure_ready()`, `start_monitor()/stop_monitor()`, `publish()`, `KafkaUnavailableError`, `TOPIC_SPECS`, `get_kafka_client()` lru_cache). Topics verified live: `kafka-topics.sh --describe` -> `jobs.events.v1` PartitionCount 3, `.dlq` PartitionCount 1, both RF 1.
+- [x] Idempotent producer, `acks=-1`, key=aggregateId, headers per ARCHITECTURE §5.
+  - [2026-10-19] Producer config `enable.idempotence=True`, `acks=all`, `message.timeout.ms` from env; `publish()` sets key=aggregateId and headers `event-type`/`event-id`/`schema-version` (constants in `packages/contracts`).
+- [x] Relay loop per §6.1 (advisory lock, `FOR UPDATE SKIP LOCKED`, ordered, backoff capped at 30 s, stops batch on first failure, `OUTBOX_RELAY_ENABLED` flag, graceful stop).
+  - [2026-10-19] `apps/outbox/relay.py` (`relay_once`/`_drain`, `select_for_update(skip_locked=True)` in id order, `pg_try_advisory_lock(4242001)`, `backoff_seconds` cap 30 s, stops batch on first failure) + `apps/outbox/management/commands/run_relay.py` (monitor-driven; publishes only while `status == "up"`; SIGINT/SIGTERM graceful stop; respects `OUTBOX_RELAY_ENABLED`).
+- [x] `GET /internal/admin/outbox` (+ `X-Internal-Token` guard); `/readyz` reports `kafka: up|degraded` without failing readiness.
+  - [2026-10-19] `apps/core/internal.py` (`require_internal`, `hmac.compare_digest`), `apps/outbox/views.py` + `urls.py` (`{pending, oldestPendingAgeSeconds, lastError, publishedLastHour}`), `apps/core/views.py` `readyz` reports kafka status and lazily starts the monitor.
+- [x] Tests: (a) happy path: published event arrives on topic with valid envelope; (b) producer failing -> rows pending, API still 2xx, `attempts` grows; (c) recovery -> backlog drained **in order**; (d) crash-between-ack-and-mark simulation -> duplicate delivery is possible and acceptable (assert same `eventId`).
+  - [2026-10-19] `tests/test_relay.py` (6 cases, `FakePublisher` with `fail_times`; covers drain-in-order, backoff/growth, stop-batch-on-failure) and `tests/test_internal.py` (5 cases).
 - **Acceptance:** `make verify` green. Manual: `docker compose -f deploy/docker-compose.dev.yml stop kafka` -> create + publish a job via API -> 200, `/internal/admin/outbox` shows `pending >= 1` -> `start kafka` -> pending 0 within 30 s.
+  - [2026-10-19] `./tasks.ps1 verify` -> ruff clean, format 88 files, mypy Success x3, pytest 11 + 49 + 5 = 65. Live outage: stop kafka -> publish HTTP 200 -> outbox `pending:1, lastError:"1 message(s) not delivered before timeout"` -> start kafka -> pending 1 -> 1 -> 0 within ~10 s; final `{pending:0, publishedLastHour:5}`.
 
 ### M4: Candidate Service core and consumer
 - [ ] Migrations: `candidates`, `jobs` (replica), `applications` (with `UNIQUE (candidate_id, job_id)`), `processed_events`.
@@ -195,6 +201,9 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M2] PowerShell mangles inline JSON for `curl.exe` (`"` escaping). Use `--data-binary "@file.json"` with a temp file for HTTP checks instead of `-d "{...}"`.
 - [2026-10-19, M2] `uv run python manage.py runserver ... --noreload` leaves TWO processes (the `uv` parent and the `python` child). `Stop-Process` on the parent leaves the child holding port 3001, so a later server silently fails to bind and old requests hit the STALE URLconf (new routes 404). Fix: kill the actual listener pid(s) (`Get-NetTCPConnection -LocalPort 3001 -State Listen`) in a loop until none remain. Symptom to watch for: `/jobs` 404 with the Django debug page listing only the old routes.
 - [2026-10-19, M2] `IsRecruiter` must check `request.auth` (the JWT payload), not `request.user` alone; `force_authenticate` sets only `request.user`, so recruiter-route tests must send a real `Authorization: Bearer` token (helper `auth_client` uses `issue_access_token`).
+- [2026-10-19, M3] `confluent_kafka.AdminClient` created as a local variable is garbage-collected before its `create_topics` futures resolve. Result: `_DESTROY: handle is terminating`, topics never created, and every produce then fails with `UNKNOWN_TOPIC_OR_PART` / `_MSG_TIMED_OUT`. Fix: hold ONE persistent `AdminClient` on the `KafkaClient` instance (`self._admin_client`, lazy) and reuse it in `_ensure_topics()`/`_ping()`.
+- [2026-10-19, M3] If the relay publishes while the broker is not ready, each row burns the full 5 s `message.timeout.ms` before failing (slow, noisy). Fix: `run_relay` starts the monitor and only calls `relay_once` when `client.status == "up"`; rows stay pending with no timeout burn while Kafka is down.
+- [2026-10-19, M3] The relay's own process can be started twice by accident (each `uv run` leaves a parent + child). The `pg_try_advisory_lock` makes the spare relay a no-op, but avoid duplicates when scripting: kill `run_relay`/`runserver` python pids before starting.
 
 ---
 
@@ -202,6 +211,7 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 
 Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 
+- [2026-10-19, M3] The relay publishes only while `KafkaClient.status == "up"` (monitor-driven) instead of attempting on every cycle. Why: a broker outage then leaves rows pending with no per-row flush timeout and no escalating backoff, so recovery is a clean drain. Rejected: keep attempting and rely on backoff (5 s stall per row, noisier logs).
 - [2026-10-19, M2] The recruiter IS the Django auth user (`AUTH_USER_MODEL = recruiters.Recruiter`, `AbstractBaseUser`). Why: SimpleJWT, argon2id hashing, and `last_login` work without a second profile table. Rejected: `auth.User` + `Recruiter` profile (two tables, needless join).
 - [2026-10-19, M2] UUID primary keys use Python-side `uuid.uuid4`, not `gen_random_uuid()`. Why: no DB default needed, works in bulk tests without a round trip. Rejected: `db_default` (harder to introspect, migration noise).
 - [2026-10-19, M2] Auth endpoints return a single access token (no refresh endpoint). Why: assignment only needs login -> access token; `role`/`iss`/`sub` claims are the contract (ARCHITECTURE.md section 9). Rejected: exposing SimpleJWT refresh flow (extra surface, not required).
@@ -296,3 +306,14 @@ Template:
 - Not done / left half-way: M3 onward (Kafka client, relay, `/internal/admin/outbox`). Nothing half-written in M2.
 - Gotchas/decisions added: stale `runserver` processes hold port 3001 (kill the listening pid in a loop); `IsRecruiter` reads `request.auth`, so tests need a real Bearer token; outbox `payload` stores the full envelope JSON.
 - Next session should start with: M3 — `confluent-kafka` client with lazy/background connect + retry, `ensureTopics`, idempotent producer (`acks=all`, key=aggregateId), the relay loop (advisory lock, `FOR UPDATE SKIP LOCKED`, ordered, backoff, `OUTBOX_RELAY_ENABLED`), `GET /internal/admin/outbox`, `/readyz` Kafka status.
+
+### Session 5: 2026-10-19: M3 (outbox relay + producer) — M3 COMPLETE
+- Did: implemented M3 in job-service: `apps/core/kafka.py` (`KafkaClient`, `status: unknown|up|degraded`, `ensure_ready`, monitor thread, idempotent producer `acks=all`, topics `jobs.events.v1` x3 + `.dlq` x1), `apps/core/internal.py` (`X-Internal-Token`, `hmac.compare_digest`), `apps/outbox/relay.py` (advisory lock `4242001`, `select_for_update(skip_locked=True)`, ordered, backoff cap 30 s, stop batch on first failure), `apps/outbox/management/commands/run_relay.py` (monitor-driven; publishes only while `status == "up"`; graceful SIGINT/SIGTERM), `apps/outbox/views.py` + `urls.py` (`GET /internal/admin/outbox`), `apps/core/views.py` (`/readyz` reports kafka status), settings (`KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_MONITOR_ENABLED`, `KAFKA_MESSAGE_TIMEOUT_MS`, `OUTBOX_RELAY_ENABLED`, `INTERNAL_TOKEN`), `contracts` header constants, `tests/test_relay.py` (6) + `tests/test_internal.py` (5).
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "88 files already formatted", mypy "Success" x3, pytest 11 + 49 + 5 = 65 passed.
+  - Topics live: `kafka-topics.sh --describe` -> `jobs.events.v1` PartitionCount 3, RF 1; `jobs.events.v1.dlq` PartitionCount 1.
+  - Happy path live: create + publish -> HTTP 201/200, outbox `{pending:0, publishedLastHour:4}`.
+  - Outage live: `docker compose ... stop kafka` -> publish HTTP 200 -> outbox `{pending:1, lastError:"1 message(s) not delivered before timeout"}` -> `start kafka` -> pending 1 -> 1 -> 0 within ~10 s -> final `{pending:0, publishedLastHour:5}`.
+- Not done / left half-way: nothing half-written. M4 not started.
+- Gotchas/decisions added: AdminClient GC (`_DESTROY`, `UNKNOWN_TOPIC_OR_PART`) -> persistent `self._admin_client`; relay gates on monitor `status == "up"` to avoid per-row 5 s flush timeout while Kafka is down; duplicate `run_relay`/`runserver` python pids when scripting (`uv` parent + child). Decision: relay publishes only while status is `up`.
+- Next session should start with: M4 — Candidate Service migrations (`candidates`, `jobs` replica, `applications` with `UNIQUE (candidate_id, job_id)`, `processed_events`), candidate auth, and the consumer (`processed_events` insert + version-guarded upsert in ONE tx, 3 retries with backoff, non-retryable -> DLQ, offset after DLQ publish).

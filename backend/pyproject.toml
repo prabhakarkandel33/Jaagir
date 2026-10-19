@@ -44,7 +44,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/migrations/*.py" = ["E501"]
 "**/tests/**" = ["S101", "S105", "S106"]
-"**/config/settings/*.py" = ["E402", "F401", "F403", "F405"]
+"**/config/settings/*.py" = ["E402", "F401", "F403", "F405", "S105"]
 # Django Meta options and REQUIRED_FIELDS are class-level by design.
 "**/models.py" = ["RUF012", "DJ001"]
 # DRF serializers/views declare class-level lists/dicts by framework design.

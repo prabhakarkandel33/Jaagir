@@ -57,6 +57,11 @@ class ServiceSettings(BaseSettings):
     # Kafka: reachable but never required for availability (invariant I9).
     kafka_bootstrap_servers: str = "localhost:9092"
     outbox_relay_enabled: bool = True
+    # Background Kafka monitor (topics + status). Off in tests.
+    kafka_monitor_enabled: bool = True
+    # How long the producer waits for a broker ack before the relay treats the
+    # delivery as failed and backs off.
+    kafka_message_timeout_ms: int = 5000
 
     # Internal endpoints (invariant I8).
     internal_token: str = ""

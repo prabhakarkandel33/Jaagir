@@ -6,6 +6,7 @@ Kafka status without ever failing readiness (invariant I9).
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import connection
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
@@ -15,6 +16,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.core.kafka import get_kafka_client
 from config.env import get_settings
 
 
@@ -46,12 +48,18 @@ def readyz(request: Request) -> Response:
     except Exception:
         database_ok = False
 
+    kafka = get_kafka_client()
+    if settings.KAFKA_MONITOR_ENABLED:
+        # Lazily start the connect/retry monitor on the first probe. It never
+        # blocks and never fails readiness (invariant I9).
+        kafka.start_monitor()
+
     body = {
         "status": "ok" if database_ok else "unavailable",
         "checks": {
             "database": "ok" if database_ok else "down",
-            # Kafka is optional for availability; wired in M3.
-            "kafka": "unknown",
+            # Kafka is optional for availability: reported, never fatal.
+            "kafka": kafka.status,
         },
     }
     http_status = status.HTTP_200_OK if database_ok else status.HTTP_503_SERVICE_UNAVAILABLE

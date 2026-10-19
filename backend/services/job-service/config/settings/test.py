@@ -11,6 +11,10 @@ from config.settings.base import *
 
 DEBUG = False
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+# No background Kafka thread and no real broker during tests.
+KAFKA_MONITOR_ENABLED = False
+OUTBOX_RELAY_ENABLED = True
+INTERNAL_TOKEN = "test-internal-token"
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,
     "DEFAULT_THROTTLE_RATES": {
