@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M4
-State             : NOT STARTED (M3 complete)
-Last session      : S5 (2026-10-19)
-Next action       : M4 Candidate Service core + Kafka consumer (own DB, inbox dedup, version-guarded upsert)
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 49 + 5 = 65)
+Current milestone : M5
+State             : NOT STARTED (M4 complete)
+Last session      : S6 (2026-10-19)
+Next action       : M5 Search — tsvector trigger + GIN indexes in BOTH services, query module, seed 100k, EXPLAIN evidence
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 49 + 27 = 87)
 ```
 
-Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -89,13 +89,20 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
   - [2026-10-19] `./tasks.ps1 verify` -> ruff clean, format 88 files, mypy Success x3, pytest 11 + 49 + 5 = 65. Live outage: stop kafka -> publish HTTP 200 -> outbox `pending:1, lastError:"1 message(s) not delivered before timeout"` -> start kafka -> pending 1 -> 1 -> 0 within ~10 s; final `{pending:0, publishedLastHour:5}`.
 
 ### M4: Candidate Service core and consumer
-- [ ] Migrations: `candidates`, `jobs` (replica), `applications` (with `UNIQUE (candidate_id, job_id)`), `processed_events`.
-- [ ] Candidate register/login/profile (candidate-issued JWT; also loads Job Service **public key** from env for recruiter tokens).
-- [ ] Consumer per §6.2: one DB tx (inbox insert + version-guarded upsert), 3 retries with backoff for transient errors, non-retryable -> DLQ immediately, DLQ headers, offset committed after DLQ publish. One shared `upsertJobFromSnapshot()` function (reused by M6).
-- [ ] Boot independent of Kafka (I9); `/readyz` shows consumer state.
-- [ ] Apply: job must exist locally and be `PUBLISHED` (else 404 `JOB_NOT_FOUND` / 409 `JOB_NOT_OPEN`); duplicate -> 409 `APPLICATION_ALREADY_EXISTS` via SQLSTATE 23505 (no check-then-insert race); store title/company snapshot.
-- [ ] `GET /candidates/me/applications` (paginated, newest first, includes status) + detail.
-- [ ] `GET /recruiter/jobs/:jobId/applications` (recruiter JWT from Job Service; ownership via replica `recruiter_id`; paginated). `(P1)` `PATCH /recruiter/applications/:id/status`. `(P1)` sync fallback `GET /internal/jobs/:id` when a job is missing locally (timeout 2 s; never blocks when Job Service is down).
+- [x] Migrations: `candidates`, `jobs` (replica), `applications` (with `UNIQUE (candidate_id, job_id)`), `processed_events`.
+  - [2026-10-19] Done in candidate-service: `apps/candidates/models.py` (custom `AUTH_USER_MODEL`), `apps/jobs/models.py` (replica + `JobStatus`/`EmploymentType`, check constraints, indexes), `apps/applications/models.py` (`UniqueConstraint` on `(candidate, job)`), `apps/events/models.py` (`ProcessedEvent` + `ConsumerStatus` heartbeat). Migrations 0001 x4 + `events.0002_consumerstatus` applied to `candidate_db`.
+- [x] Candidate register/login/profile (candidate-issued JWT; also loads Job Service **public key** from env for recruiter tokens).
+  - [2026-10-19] `apps/candidates/{serializers,services,views,urls}.py`, `apps/core/authentication.py` (`IssuerAwareJWTAuthentication` picks the verifying key from the token `iss`), `apps/core/throttling.py`, `apps/core/permissions.py`. Live: register 201 (token `role=candidate`, `iss=candidate-service`), login 200, duplicate 409.
+- [x] Consumer per §6.2: one DB tx (inbox insert + version-guarded upsert), 3 retries with backoff for transient errors, non-retryable -> DLQ immediately, DLQ headers, offset committed after DLQ publish. One shared `upsertJobFromSnapshot()` function (reused by M6).
+  - [2026-10-19] `apps/events/{services,consumer}.py`, `apps/jobs/{repo,services}.py` (`upsert_job_from_snapshot`, `ON CONFLICT (id) DO UPDATE ... WHERE jobs.version < EXCLUDED.version`), `management/commands/consume_events.py`. Tests in `tests/test_consumer.py` (7): duplicate -> one row/one `processed_events`, v3-then-v2 stays v3, JobClosed, poison -> DLQ + next message applies, transient retry, shared upsert. Live: consumer replayed the M3 backlog `fromBeginning` and applied every event once.
+- [x] Boot independent of Kafka (I9); `/readyz` shows consumer state.
+  - [2026-10-19] `apps/core/views.py` `readyz` reports `consumer`/`kafka` from the `consumer_status` heartbeat row (`up|degraded|stale|unknown`, `disabled` when `KAFKA_CONSUMER_ENABLED=False`) and never fails readiness. Live with Kafka down: `GET /healthz` 200 and `/readyz` `status: ok`. Live with Kafka up: `{"consumer":"up","kafka":"up"}`. Tests `tests/test_health.py` (6).
+- [x] Apply: job must exist locally and be `PUBLISHED` (else 404 `JOB_NOT_FOUND` / 409 `JOB_NOT_OPEN`); duplicate -> 409 `APPLICATION_ALREADY_EXISTS` via SQLSTATE 23505 (no check-then-insert race); store title/company snapshot.
+  - [2026-10-19] `apps/applications/services.py` + `views.py`. Live against the replica: apply 201 (snapshots filled), duplicate 409 `APPLICATION_ALREADY_EXISTS`, after close 409 `JOB_NOT_OPEN`. Test: 10 concurrent applies -> 1 created, 9 conflict, 1 row.
+- [x] `GET /candidates/me/applications` (paginated, newest first, includes status) + detail.
+  - [2026-10-19] `apps/applications/views.py` (`CandidateApplicationsView`, `CandidateApplicationDetailView`); live history returns `total: 1`.
+- [x] `GET /recruiter/jobs/:jobId/applications` (recruiter JWT from Job Service; ownership via replica `recruiter_id`; paginated). `(P1)` `PATCH /recruiter/applications/:id/status`. `(P1)` sync fallback `GET /internal/jobs/:id` when a job is missing locally (timeout 2 s; never blocks when Job Service is down).
+  - [2026-10-19] Done: `RecruiterJobApplicationsView` verifies the Job-Service-issued token with the peer public key and checks `jobs.recruiter_id`. Live: owner sees `total: 1`; another recruiter -> 404 `JOB_NOT_FOUND`. **P1 items NOT done** (status PATCH, sync fallback).
 - **Acceptance (tests):** same event delivered twice -> one row, one `processed_events`; v3 then v2 -> stays v3; JobClosed -> apply gives 409 `JOB_NOT_OPEN`; **10 concurrent applies by one candidate -> exactly one 201, nine 409, one row**; malformed message -> lands in DLQ and next message still processes; recruiter B cannot read recruiter A's applications. `make verify` green.
 
 ### M5: Search (PostgreSQL FTS)
@@ -205,6 +212,15 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M3] If the relay publishes while the broker is not ready, each row burns the full 5 s `message.timeout.ms` before failing (slow, noisy). Fix: `run_relay` starts the monitor and only calls `relay_once` when `client.status == "up"`; rows stay pending with no timeout burn while Kafka is down.
 - [2026-10-19, M3] The relay's own process can be started twice by accident (each `uv run` leaves a parent + child). The `pg_try_advisory_lock` makes the spare relay a no-op, but avoid duplicates when scripting: kill `run_relay`/`runserver` python pids before starting.
 
+- [2026-10-19, M4] The consumer runs in its OWN process (`manage.py consume_events`), so an in-process `get_event_consumer()` cache is invisible to the web process. Symptom: `/readyz` stuck at `consumer: unknown` even while the consumer logs `status up`. Fix: the consumer upserts a single `consumer_status` row (status, last_error, processed, dlq_count, last_heartbeat_at) on every status change, on each handled message and on each idle poll; `readyz` reads that row and reports `up|degraded|stale|unknown` (stale after 15 s without a heartbeat). Rule: any cross-process state must go through the DB, never a module-level cache.
+- [2026-10-19, M4] `manage.py runserver --noreload` keeps serving the OLD code after a file edit, so a fixed `readyz` still answered with the old logic and looked broken. Symptom: an edit did not change the live response. Fix: restart the listener (`Get-NetTCPConnection -LocalPort 3002 -State Listen` -> `Stop-Process`) after editing views/settings.
+- [2026-10-19, M4] `confluent_kafka` stubs type `Message.headers()` as `Union[Dict[str, ...], List[Tuple[str, ...]]]`, so `for k, v in msg.headers()` is `str-unpack` to mypy (dict keys are strings) and `produce(headers=...)` rejects `list[tuple[str, bytes]]` (parameter is invariant). Fix: `cast("list[tuple[str, str | bytes | None]]", msg.headers() or [])` into a `list[tuple[str, str | bytes | None]]`.
+- [2026-10-19, M4] SimpleJWT `Token.verify()` raises `TokenError("Token has no id")` when the `jti` claim is absent, which surfaces as a 401 `INVALID_TOKEN` on the peer service. Fix: mint test/peer tokens with an explicit `jti` (the real SimpleJWT flow always sets one).
+- [2026-10-19, M4] Do NOT hand an empty verifying key to a SimpleJWT `TokenBackend`: ES256 decode fails and every token looks invalid. Fix: read the (unverified) `iss` with `PyJWT.decode(..., options={"verify_signature": False})` first, then select the key (`candidate-service` -> own signing key; `job-service` -> `JOB_SERVICE_JWT_PUBLIC_KEY`).
+- [2026-10-19, M4] The candidate dev box needed its own ES256 keypair plus the Job Service **public** key: `candidate-service/.env` (`JWT_SIGNING_KEY`, `JWT_PUBLIC_KEY`, `JOB_SERVICE_JWT_PUBLIC_KEY`) is git-ignored; generate with `uv run python -c "..."` (base64 PEM) and copy the job-service public key across.
+- [2026-10-19, M4] The candidate replica detail endpoint (`GET /jobs/:id`) returns 404 for a CLOSED job by design, but the local row still exists with `status='CLOSED'` — that is why applying after close gives 409 `JOB_NOT_OPEN` (not 404). Do not "fix" the 404 by exposing closed jobs.
+- [2026-10-19, M4] Do not poll a start-up loop with an unbounded `for` body that contains blocking `Invoke-WebRequest` calls: 60 iterations x (0.5 s + 2 x 2 s timeouts) can exceed the tool timeout and the terminal then looks hung. Use `curl.exe -m 2`, a small iteration count, and print the result.
+
 ---
 
 ## 5. Decisions log (append-only)
@@ -237,6 +253,8 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-18, M1] Tests target real behavior only. No coverage padding, no assertions written for their own sake. Why: human instruction. Consequence: M1 ships few tests (contract validation, `/healthz`, `/readyz`, uniform 404); the reliability paths (outbox, consumer, reconciler, DLQ) get mandatory, meaningful tests in M3/M4/M6.
 - [2026-10-18, M1] Local `.env` files exist on the dev machine and are git-ignored; `.env.example` keeps placeholders only (I6). Why: services need real dev values to boot; secrets must never be committed.
 - [2026-10-18, M1] Services are non-package `uv` workspace members (run in place), not installed distributions. Why: both projects expose top-level `config/` and `apps/`; installing both into one shared venv collides. Rejected: installing each service (name clash), namespacing every app (unidiomatic Django).
+- [2026-10-19, M4] The Candidate Service accepts recruiter tokens with ONE authentication class (`IssuerAwareJWTAuthentication`) that reads the unverified `iss` and selects the verifying key (own signing key for candidate tokens, `JOB_SERVICE_JWT_PUBLIC_KEY` for job-service tokens). Why: one auth path for both audiences; the peer public key comes from env. Rejected: a second authentication class per route (route-level duplication), custom middleware (same effect, more moving parts).
+- [2026-10-19, M4] The consumer publishes its state through a singleton `consumer_status` heartbeat row that `/readyz` reads (fresh <= 15 s, else `stale`). Why: the consumer is a separate process, so the web process can only learn its state through the DB. Rejected: running the consumer inside the web process (double consumer-group membership), a file or Redis heartbeat (extra dependency).
 
 ---
 
@@ -317,3 +335,13 @@ Template:
 - Not done / left half-way: nothing half-written. M4 not started.
 - Gotchas/decisions added: AdminClient GC (`_DESTROY`, `UNKNOWN_TOPIC_OR_PART`) -> persistent `self._admin_client`; relay gates on monitor `status == "up"` to avoid per-row 5 s flush timeout while Kafka is down; duplicate `run_relay`/`runserver` python pids when scripting (`uv` parent + child). Decision: relay publishes only while status is `up`.
 - Next session should start with: M4 — Candidate Service migrations (`candidates`, `jobs` replica, `applications` with `UNIQUE (candidate_id, job_id)`, `processed_events`), candidate auth, and the consumer (`processed_events` insert + version-guarded upsert in ONE tx, 3 retries with backoff, non-retryable -> DLQ, offset after DLQ publish).
+
+### Session 6: 2026-10-19: M4 (Candidate Service core + consumer) — M4 COMPLETE
+- Did: implemented the whole Candidate Service: models + migrations (`candidates`, `jobs` replica, `applications` with `UNIQUE (candidate_id, job_id)`, `processed_events`, `consumer_status`), candidate auth (`apps/candidates` + `apps/core/authentication.py` `IssuerAwareJWTAuthentication`), the version-guarded replica upsert (`apps/jobs/repo.py` `UPSERT_JOB_SQL`, `apps/jobs/services.py` `upsert_job_from_snapshot`), the consumer (`apps/events/services.py` `apply_envelope` = inbox insert + upsert in ONE tx; `apps/events/consumer.py`; `management/commands/consume_events.py`), applications (`apps/applications/*`: apply with 409 `APPLICATION_ALREADY_EXISTS` via SQLSTATE 23505, history, recruiter view with ownership), `/readyz` consumer state via the `consumer_status` heartbeat, and tests (`test_consumer.py` 7, `test_applications.py` 6, `test_auth.py` 6, `test_health.py` 6).
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "125 files already formatted", mypy "Success" x3, pytest 11 + 49 + 27 = 87 passed.
+  - Live end-to-end (all four processes up): recruiter register/login on :3001 -> create DRAFT v1 -> publish v2; candidate replica `GET /jobs/:id` 200 with `version: 2`, `PUBLISHED` within ~1 s; candidate register (token `role=candidate`, `iss=candidate-service`) -> apply 201 with title/company snapshots -> duplicate 409 `APPLICATION_ALREADY_EXISTS` -> history `total: 1`; recruiter A `GET /recruiter/jobs/:id/applications` `total: 1` (Job-Service token accepted cross-service) -> recruiter B 404 `JOB_NOT_FOUND`; close -> replica `CLOSED version 3` -> apply 409 `JOB_NOT_OPEN`; DB check `processed_events: 7`, `applications: 1`.
+  - Consumer live: on boot it replayed the M3 backlog `fromBeginning` and applied each event once (`event applied` x6, no duplicates); `GET /readyz` with Kafka up -> `{"consumer":"up","kafka":"up"}`; with Kafka down -> `GET /healthz` 200 and `/readyz` `status: "ok"` (invariant I9).
+- Not done / left half-way: M4 P1 items (recruiter `PATCH /recruiter/applications/:id/status`, sync fallback `GET /internal/jobs/:id`). The live Kafka-stop/start cycle for the consumer was **not** re-run at the end (M6 owns the formal outage proof); the I9 availability half (healthz 200 with Kafka down) was observed. M6 not started.
+- Gotchas/decisions added: build/type issues (`headers()` union type -> `cast`, SimpleJWT needs `jti`, empty verifying key breaks ES256 -> peek `iss` with PyJWT); operational (`--noreload` serves stale readyz code -> restart the listener; unbounded poll loops blow the tool timeout -> use `curl.exe -m 2` with few iterations); candidate dev `.env` needs its own ES256 keypair + the Job Service public key. Decisions: `IssuerAwareJWTAuthentication` selects the key from `iss`; consumer state via a DB heartbeat row.
+- Next session should start with: M5 Search — trigger + `search_vector` + GIN indexes in BOTH services, the query module (`websearch_to_tsquery`, weighted `ts_rank_cd`, filters, `page/pageSize`, `total`), `GET /jobs` on both services, `scripts/seed_jobs.py` (`make seed N=100000`), `scripts/explain_analyze.sh`, `docs/search-performance.md`.

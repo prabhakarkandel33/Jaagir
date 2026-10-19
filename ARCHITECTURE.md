@@ -134,6 +134,8 @@ applications(id uuid pk, candidate_id fk, job_id fk -> jobs.id,
              UNIQUE (candidate_id, job_id))                    -- invariant I7
 
 processed_events(event_id uuid pk, event_type, processed_at)   -- inbox / dedup
+consumer_status(id smallint pk /* always 1 */, status, last_error, processed, dlq_count, last_heartbeat_at)
+                                                              -- consumer heartbeat read by /readyz
 reconcile_runs(id bigserial pk, mode text, started_at, finished_at, checked int, repaired int, error text null)
 ```
 

@@ -25,6 +25,10 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "apps.core",
+    "apps.candidates",
+    "apps.jobs",
+    "apps.applications",
+    "apps.events",
 ]
 
 MIDDLEWARE = [
@@ -62,6 +66,9 @@ USE_I18N = False
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# The candidate is the Django auth user in this service.
+AUTH_USER_MODEL = "candidates.Candidate"
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.body_max_bytes
 
 CORS_ALLOWED_ORIGINS = env.cors_allowed_origins_list
@@ -69,7 +76,9 @@ CORS_ALLOW_CREDENTIALS = False
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        # Issuer-aware: accepts candidate tokens (this service's key) and
+        # recruiter tokens (the Job Service public key from env).
+        "apps.core.authentication.IssuerAwareJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
@@ -83,6 +92,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/min",
         "user": "600/min",
+        "auth": "10/min",
     },
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -101,8 +111,31 @@ SIMPLE_JWT = {
     "ALGORITHM": env.jwt_algorithm,
     "ISSUER": env.jwt_issuer,
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
-    "SIGNING_KEY": env.jwt_signing_key,
-    "VERIFYING_KEY": env.jwt_public_key,
+    # ARCHITECTURE.md section 9: the subject claim is ``sub``.
+    "USER_ID_CLAIM": "sub",
+    # This service signs candidate tokens (base64-of-PEM env values decoded
+    # here so newlines survive).
+    "SIGNING_KEY": env.jwt_signing_key_pem,
+    "VERIFYING_KEY": env.jwt_public_key_pem,
 }
 
+# Recruiter tokens are issued by the Job Service; verify them with the peer's
+# public key only (ARCHITECTURE.md section 9).
+JOB_SERVICE_JWT_ISSUER = "job-service"
+JOB_SERVICE_JWT_PUBLIC_KEY = env.job_service_jwt_public_key_pem
+
 LOGGING = build_logging_config(env.log_level)
+
+# Kafka (invariant I9: never required for availability).
+KAFKA_BOOTSTRAP_SERVERS = env.kafka_bootstrap_servers
+KAFKA_CONSUMER_GROUP_ID = env.kafka_consumer_group_id
+KAFKA_CONSUMER_ENABLED = env.kafka_consumer_enabled
+KAFKA_MESSAGE_TIMEOUT_MS = env.kafka_message_timeout_ms
+
+# Reconciliation (M6).
+RECONCILE_INCREMENTAL_SECONDS = env.reconcile_incremental_seconds
+RECONCILE_BATCH_LIMIT = env.reconcile_batch_limit
+
+# Internal endpoints + the Job Service internal URL (invariant I8).
+INTERNAL_TOKEN = env.internal_token
+JOB_SERVICE_INTERNAL_URL = env.job_service_internal_url

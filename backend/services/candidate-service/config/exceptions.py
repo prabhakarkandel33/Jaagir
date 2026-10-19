@@ -39,7 +39,11 @@ class ApiError(APIException):
         self.error_code = code
         self.error_message = message
         self.error_details = details or {}
-        super().__init__(message, code=http_status)
+        super().__init__(message)
+        # DRF reads ``status_code`` from the instance, not from ``code`` (which
+        # is a machine-readable string). Set both.
+        self.status_code = http_status
+        self.code = code
 
 
 def _message_from_detail(detail: Any) -> str:
