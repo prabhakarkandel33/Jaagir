@@ -241,10 +241,10 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
   FROM jobs, websearch_to_tsquery('english', $1) q
   WHERE status = 'PUBLISHED' AND search_vector @@ q
         [AND employment_type = $2] [AND lower(location) = lower($3)] [AND skills @> $4]
-  ORDER BY rank DESC, published_at DESC, id
+  ORDER BY rank DESC, published_at DESC NULLS LAST, id
   LIMIT $n OFFSET $m;
   ```
-  `status = 'PUBLISHED'` must appear literally so the planner can use the partial index. Empty `q` -> browse query ordered by `published_at DESC`. `total` via a separate bounded `COUNT(*)`.
+  `status = 'PUBLISHED'` must appear literally so the planner can use the partial index. Empty `q` -> browse query ordered by `published_at DESC NULLS LAST`. `NULLS LAST` keeps rows whose `published_at` was never stamped (test fixtures, manual inserts) out of the top of the browse order. `total` via a separate bounded `COUNT(*)`.
 - **Ordering:** relevance (weighted rank: title > skills/company > description), then recency, then id for stable pagination.
 - **Evidence:** `docs/search-performance.md` has the strategy and `EXPLAIN (ANALYZE, BUFFERS)` on a 100k-row seed: before (Seq Scan) vs after (Bitmap Index Scan on the GIN index), for at least 3 queries.
 

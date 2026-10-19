@@ -13,10 +13,51 @@ from rest_framework.views import APIView
 
 from apps.core.pagination import PageNumberPagination
 from apps.core.permissions import IsRecruiter
-from apps.jobs import services
+from apps.jobs import search, services
 from apps.jobs.models import Job, JobStatus
-from apps.jobs.serializers import JobSerializer, JobWriteSerializer
+from apps.jobs.serializers import (
+    JobSearchParamsSerializer,
+    JobSearchResultSerializer,
+    JobSerializer,
+    JobWriteSerializer,
+)
 from config.exceptions import ApiError
+
+
+class PublicJobSearchView(APIView):
+    """Public search over PUBLISHED jobs. Drafts and closed jobs never appear."""
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        parameters=[JobSearchParamsSerializer],
+        responses={200: OpenApiResponse(description="{items, page, pageSize, total}")},
+        description=(
+            "Full-text search over published jobs (PostgreSQL tsvector/tsquery). "
+            "An empty `q` browses by recency. Filters: employmentType, location, skills."
+        ),
+    )
+    def get(self, request: Request) -> Response:
+        params = JobSearchParamsSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        data = params.validated_data
+
+        rows, total = search.search_jobs(
+            q=data["q"],
+            employment_type=data["employmentType"] or None,
+            location=data["location"] or None,
+            skills=data["skills"] or None,
+            page=data["page"],
+            page_size=data["pageSize"],
+        )
+        return Response(
+            {
+                "items": JobSearchResultSerializer(rows, many=True).data,
+                "page": data["page"],
+                "pageSize": data["pageSize"],
+                "total": total,
+            }
+        )
 
 
 class RecruiterJobListCreateView(APIView):

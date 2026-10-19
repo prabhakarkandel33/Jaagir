@@ -85,10 +85,12 @@ openapi:
 	cd $(CAND) && uv run python manage.py spectacular --file ../../../docs/openapi-candidate-service.json
 
 seed:
-	@echo "make seed: not implemented yet (M5). N=$(N)"
+	uv run --project backend python scripts/seed_jobs.py --service job --count $(N)
+	uv run --project backend python scripts/seed_jobs.py --service candidate --count $(N)
 
 explain:
-	@echo "make explain: not implemented yet (M5)"
+	uv run --project backend python scripts/explain_analyze.py --service job
+	uv run --project backend python scripts/explain_analyze.py --service candidate
 
 e2e:
 	@echo "make e2e: not implemented yet (M6)"

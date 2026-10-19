@@ -92,8 +92,14 @@ switch ($Target) {
         Invoke-In $Job  { uv run python manage.py spectacular --file ../../../docs/openapi-job-service.json }
         Invoke-In $Cand { uv run python manage.py spectacular --file ../../../docs/openapi-candidate-service.json }
     }
-    'seed' { Write-Output "tasks.ps1 seed: not implemented yet (M5). N=$N" }
-    'explain' { Write-Output 'tasks.ps1 explain: not implemented yet (M5)' }
+    'seed' {
+        Invoke-In '.' { uv run --project backend python scripts/seed_jobs.py --service job --count $N }
+        Invoke-In '.' { uv run --project backend python scripts/seed_jobs.py --service candidate --count $N }
+    }
+    'explain' {
+        Invoke-In '.' { uv run --project backend python scripts/explain_analyze.py --service job }
+        Invoke-In '.' { uv run --project backend python scripts/explain_analyze.py --service candidate }
+    }
     'e2e' { Write-Output 'tasks.ps1 e2e: not implemented yet (M6)' }
     'prod-local' { Write-Output 'tasks.ps1 prod-local: not implemented yet (M7)' }
     default { Write-Output "Unknown target: $Target"; Write-Help; exit 1 }

@@ -9,7 +9,11 @@ Job Service database (invariant I1).
 from __future__ import annotations
 
 from django.contrib.postgres.fields import ArrayField
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 
 class JobStatus(models.TextChoices):
@@ -52,6 +56,10 @@ class Job(models.Model):
     # When this replica row was last written from an event/snapshot.
     synced_at = models.DateTimeField(auto_now=True)
 
+    # Maintained by a BEFORE INSERT OR UPDATE trigger (migration 0002), the
+    # same design as the Job Service (ARCHITECTURE.md section 7).
+    search_vector = SearchVectorField(null=True, editable=False)
+
     class Meta:
         db_table = "jobs"
         indexes = [
@@ -63,6 +71,21 @@ class Job(models.Model):
                 fields=["recruiter_id", "-source_updated_at"],
                 name="cjobs_recruiter_updated_idx",
             ),
+            # Partial GIN: only PUBLISHED rows are candidate-visible. The query
+            # must contain the literal `status = 'PUBLISHED'` predicate.
+            GinIndex(
+                fields=["search_vector"],
+                condition=Q(status="PUBLISHED"),
+                name="cjobs_search_vector_gin",
+            ),
+            GinIndex(fields=["skills"], name="cjobs_skills_gin"),
+            models.Index(
+                fields=["-published_at", "id"],
+                condition=Q(status="PUBLISHED"),
+                name="cjobs_pub_browse_idx",
+            ),
+            models.Index(fields=["employment_type"], name="cjobs_employment_idx"),
+            models.Index(Lower("location"), name="cjobs_location_lower_idx"),
         ]
         constraints = [
             models.CheckConstraint(

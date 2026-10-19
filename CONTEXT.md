@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M5
-State             : NOT STARTED (M4 complete)
-Last session      : S6 (2026-10-19)
-Next action       : M5 Search — tsvector trigger + GIN indexes in BOTH services, query module, seed 100k, EXPLAIN evidence
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 49 + 27 = 87)
+Current milestone : M6
+State             : NOT STARTED (M5 complete)
+Last session      : S7 (2026-10-19)
+Next action       : M6 Reconciliation + DLQ replay + outage proof (scenarios A-E)
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 69 + 42 = 122)
 ```
 
-Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -106,12 +106,18 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
 - **Acceptance (tests):** same event delivered twice -> one row, one `processed_events`; v3 then v2 -> stays v3; JobClosed -> apply gives 409 `JOB_NOT_OPEN`; **10 concurrent applies by one candidate -> exactly one 201, nine 409, one row**; malformed message -> lands in DLQ and next message still processes; recruiter B cannot read recruiter A's applications. `make verify` green.
 
 ### M5: Search (PostgreSQL FTS)
-- [ ] Migrations in **both** services (per ARCHITECTURE §7): trigger function + `search_vector`, backfill existing rows, partial GIN on `search_vector`, GIN on `skills`, btree indexes. Down migrations drop them.
-- [ ] Query module with `websearch_to_tsquery`, weighted `ts_rank_cd`, tie-breakers, filters (employmentType, location, skills), `page/pageSize`, `total`. Empty query = browse. Endpoints: Job Service `GET /jobs`, Candidate Service `GET /jobs`. Unpublished and closed never returned.
-- [ ] `scripts/seed-jobs.ts` (`make seed N=100000`): realistic varied vocabulary from word lists (no heavy deps), ~90% PUBLISHED / 5% CLOSED / 5% DRAFT, inserted in batches. Candidate side is seeded through its own DB path (it is a replica; for benchmark seeding direct insert is allowed inside `scripts/` only).
-- [ ] `scripts/explain-analyze.sh` / `make explain`: runs >= 3 representative queries with `EXPLAIN (ANALYZE, BUFFERS)`, once with indexes disabled/dropped (Seq Scan baseline) and once with them (Bitmap Index Scan on GIN).
-- [ ] `docs/search-performance.md`: indexing strategy explained, query shapes, real captured plans and timings, caveats.
+- [x] Migrations in **both** services (per ARCHITECTURE §7): trigger function + `search_vector`, backfill existing rows, partial GIN on `search_vector`, GIN on `skills`, btree indexes. Down migrations drop them.
+  - [2026-10-19] `apps/jobs/migrations/0002_job_search.py` in BOTH services (identical SQL; candidate uses `cjobs_*` index names). Trigger `jobs_search_vector_trg` (`BEFORE INSERT OR UPDATE`, weights A title / B skills+company / C description), then `UPDATE jobs SET search_vector = NULL` to backfill through the trigger, then the indexes. `reverse_sql` drops the trigger and the function. Verified live: `search_vector` = `'acm':6B 'build':7C ... 'senior':1A`, trigger present, all 9 indexes present.
+- [x] Query module with `websearch_to_tsquery`, weighted `ts_rank_cd`, tie-breakers, filters (employmentType, location, skills), `page/pageSize`, `total`. Empty query = browse. Endpoints: Job Service `GET /jobs`, Candidate Service `GET /jobs`. Unpublished and closed never returned.
+  - [2026-10-19] `apps/jobs/search.py` in both services (SQL strings + `_filter_sql`; `status = 'PUBLISHED'` is a literal so the partial GIN index applies; filters are fixed fragments with bound params; `ORDER BY rank DESC, published_at DESC NULLS LAST, id`). Views `PublicJobSearchView` (:3001) and `JobSearchView` (:3002); `JobSearchParamsSerializer` validates `q`, `employmentType`, `location`, `skills`, `page`, `pageSize` (max 50). Live: `q=python engineer` -> `total: 3707`; `q=kubernetes&employmentType=CONTRACT` -> `total: 1584`; hostile `q` -> 200; bad `employmentType` -> 400.
+- [x] `scripts/seed-jobs.ts` (`make seed N=100000`): realistic varied vocabulary from word lists (no heavy deps), ~90% PUBLISHED / 5% CLOSED / 5% DRAFT, inserted in batches. Candidate side is seeded through its own DB path (it is a replica; for benchmark seeding direct insert is allowed inside `scripts/` only).
+  - [2026-10-19] Python, not TS: `scripts/seed_jobs.py --service job|candidate --count N` (psycopg3 `cursor.copy()`, 5,000-row batches, word lists, `ANALYZE jobs` at the end). Job mode creates 50 seed recruiters (FK); candidate mode inserts directly. Live: 100,207 rows in ~21 s (job) and 100,205 rows in ~21 s (candidate). Wired to `tasks.ps1 seed -N` and `make seed N=`.
+- [x] `scripts/explain-analyze.sh` / `make explain`: runs >= 3 representative queries with `EXPLAIN (ANALYZE, BUFFERS)`, once with indexes disabled/dropped (Seq Scan baseline) and once with them (Bitmap Index Scan on GIN).
+  - [2026-10-19] `scripts/explain_analyze.py --service job|candidate`, wired to `tasks.ps1 explain` / `make explain`. Three queries: keyword, keyword+employment type, skills containment. Baseline uses session-level `SET enable_indexscan/enable_bitmapscan = off` (NOT `SET LOCAL`, which is a no-op outside a transaction and silently produced identical plans).
+- [x] `docs/search-performance.md`: indexing strategy explained, query shapes, real captured plans and timings, caveats.
+  - [2026-10-19] Written with real captured plans at 100k rows. Job Service: Q1 173.256 -> 29.097 ms, Q2 88.122 -> 16.311 ms, Q3 84.783 -> 3.136 ms. Candidate Service: Q1 60.519 -> 24.136 ms, Q2 76.225 -> 18.576 ms, Q3 91.586 -> 2.598 ms. All indexed runs show `Bitmap Index Scan on ..._search_vector_gin` / `..._skills_gin`.
 - **Acceptance (tests):** unpublished/closed excluded; title-match outranks description-match; pagination is stable and non-overlapping; weird input (`"`, `'`, `&`, `:*`, empty, 10k chars) never causes 500 and cannot inject SQL. `make explain` output shows GIN usage at 100k rows.
+  - [2026-10-19] `job-service/tests/test_search.py` (20 cases) and `candidate-service/tests/test_search.py` (15 cases) cover every acceptance bullet, including `'; DROP TABLE jobs; --` leaving the table intact and an invalid `employmentType` returning 400. `make explain` shows GIN usage at 100k rows (see doc).
 
 ### M6: Reconciliation, DLQ replay and outage proof (MOST IMPORTANT)
 - [ ] Job Service `GET /internal/jobs/snapshot?after&limit` per §6.3 (non-DRAFT, keyset by id, full payloads, token-guarded).
@@ -224,6 +230,12 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M7 (dev only)] Bind-mount ONLY the service directory and `packages/` (e.g. `../backend/services/job-service:/app/services/job-service`). Never bind-mount all of `backend/`, because that would hide the image's `/app/.venv` behind the Windows venv. Rebuild the image only when `pyproject.toml`/`uv.lock` change (`uv sync --all-packages --frozen` runs at build time).
 - [2026-10-19, M7 (dev only)] The dev image is ONE shared image (`backend/Dockerfile.dev`, context `backend/`) for all containers; each service only differs by `working_dir` + `command` (`runserver` | `run_relay` | `consume_events`). Compose healthchecks use `python -c "import urllib.request..."` because `python:3.12-slim` has no `curl`. Migrations are one-shot services; the web/consumer services wait with `depends_on: ... condition: service_completed_successfully`.
 - [2026-10-19, M7 (dev only)] Do not pass `--wait` to `docker compose up` for this file: the one-shot migrate containers exit, and the wait condition then never settles. Start with `up -d` and poll `/readyz` instead.
+- [2026-10-19, M5] The trigger backfill must be `UPDATE jobs SET search_vector = NULL`, NOT `UPDATE ... SET search_vector = to_tsvector(...)`. Assigning NULL still fires the `BEFORE UPDATE` trigger, so the expression lives in exactly one place and cannot drift between the migration and the trigger.
+- [2026-10-19, M5] `SET LOCAL enable_indexscan = off` is a no-op outside a transaction, so the "baseline" run silently produced the SAME plan as the indexed run. Symptom: two identical plans with the same timing. Fix: session-level `SET` plus an explicit `RESET` after each query (`scripts/explain_analyze.py`).
+- [2026-10-19, M5] psycopg3 has no `copy_expert`: use `with cursor.copy("COPY jobs (...) FROM STDIN") as copy: copy.write(text)`. Also, `auto_now`/`auto_now_add` are ORM-only and have NO database default, so a raw COPY must supply `synced_at`/`created_at`/`updated_at` or it fails on NOT NULL.
+- [2026-10-19, M5] The `jobs` table columns differ between the two databases (the replica has `source_updated_at`/`synced_at`, the source has `created_at`). The seed script reads `information_schema.columns` and COPYs only the intersection, instead of hardcoding a per-service column list.
+- [2026-10-19, M5] Browse ordering MUST be `published_at DESC NULLS LAST`. Plain `DESC` puts NULLs first in PostgreSQL, so rows whose `published_at` was never stamped (tests, manual inserts) jumped to the top of the browse page and the "newest first" test failed.
+- [2026-10-19, M5] At ~200 rows the planner picks a Seq Scan even with the GIN index present (correctly). Any EXPLAIN demonstration must run at 100k rows plus `ANALYZE jobs`, or it proves nothing.
 
 ---
 
@@ -260,6 +272,7 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-19, M4] The Candidate Service accepts recruiter tokens with ONE authentication class (`IssuerAwareJWTAuthentication`) that reads the unverified `iss` and selects the verifying key (own signing key for candidate tokens, `JOB_SERVICE_JWT_PUBLIC_KEY` for job-service tokens). Why: one auth path for both audiences; the peer public key comes from env. Rejected: a second authentication class per route (route-level duplication), custom middleware (same effect, more moving parts).
 - [2026-10-19, M4] The consumer publishes its state through a singleton `consumer_status` heartbeat row that `/readyz` reads (fresh <= 15 s, else `stale`). Why: the consumer is a separate process, so the web process can only learn its state through the DB. Rejected: running the consumer inside the web process (double consumer-group membership), a file or Redis heartbeat (extra dependency).
 - [2026-10-19, M7 (dev only, human-approved)] Added a one-command dev stack (`deploy/docker-compose.dev-full.yml` + `backend/Dockerfile.dev` + `tasks.ps1 stack-up`) so `docker compose up -d --build` starts kafka, both DBs, both services, the relay and the consumer. Why: the human asked for one command instead of four terminals; it does not conflict with M7, which still owns the PROD images (gunicorn, non-root, multi-stage), Caddy, the health-gated migration flow and the CI. The dev image is deliberately separate from the prod Dockerfile and uses bind mounts for hot reload.
+- [2026-10-19, M5] Search SQL is duplicated per service (`apps/jobs/search.py`) rather than shared in `packages/contracts`. Why: invariant I1 forbids importing the other service's code and `contracts` must stay schema-only; each service owns its database and its own `cjobs_*` index names. Rejected: a shared search library (would make `contracts` a runtime dependency with DB access).
 
 ---
 
@@ -351,3 +364,15 @@ Template:
 - Not done / left half-way: M4 P1 items (recruiter `PATCH /recruiter/applications/:id/status`, sync fallback `GET /internal/jobs/:id`). The live Kafka-stop/start cycle for the consumer was **not** re-run at the end (M6 owns the formal outage proof); the I9 availability half (healthz 200 with Kafka down) was observed. M6 not started.
 - Gotchas/decisions added: build/type issues (`headers()` union type -> `cast`, SimpleJWT needs `jti`, empty verifying key breaks ES256 -> peek `iss` with PyJWT); operational (`--noreload` serves stale readyz code -> restart the listener; unbounded poll loops blow the tool timeout -> use `curl.exe -m 2` with few iterations); candidate dev `.env` needs its own ES256 keypair + the Job Service public key. Decisions: `IssuerAwareJWTAuthentication` selects the key from `iss`; consumer state via a DB heartbeat row.
 - Next session should start with: M5 Search — trigger + `search_vector` + GIN indexes in BOTH services, the query module (`websearch_to_tsquery`, weighted `ts_rank_cd`, filters, `page/pageSize`, `total`), `GET /jobs` on both services, `scripts/seed_jobs.py` (`make seed N=100000`), `scripts/explain_analyze.sh`, `docs/search-performance.md`.
+
+### Session 7: 2026-10-19: M5 (search) — M5 COMPLETE
+- Did: search in BOTH services. Migrations `apps/jobs/migrations/0002_job_search.py` (trigger `jobs_search_vector_trg`, weights A/B/C, backfill via `SET search_vector = NULL`, partial GIN on PUBLISHED, GIN on skills, browse/employment/lower(location) btrees; candidate uses `cjobs_*` names). Query modules `apps/jobs/search.py` in both services (`websearch_to_tsquery`, `ts_rank_cd`, fixed filter fragments with bound params, `LIMIT/OFFSET`, separate `COUNT`, `NULLS LAST` tie-break). Endpoints `GET /jobs` on :3001 (`PublicJobSearchView`) and :3002 (`JobSearchView`) with `JobSearchParamsSerializer` (`q`, `employmentType`, `location`, `skills`, `page`, `pageSize` max 50). Scripts `scripts/seed_jobs.py` and `scripts/explain_analyze.py`; `tasks.ps1 seed -N` / `explain` and `make seed` / `explain` wired. `docs/search-performance.md` written from real plans. Tests `job-service/tests/test_search.py` (20) and `candidate-service/tests/test_search.py` (15).
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "129 files already formatted", mypy "Success" x3, pytest 11 + 69 + 42 = 122 passed.
+  - Migration live on both DBs: `search_vector` = `'acm':6B 'build':7C 'django':8C 'engin':3A 'kafka':2A,4B 'python':5B 'senior':1A`; trigger `jobs_search_vector_trg` present; all 9 indexes present.
+  - Seeded 100,207 rows (job) and 100,205 rows (candidate) in ~21 s each; `ANALYZE jobs` run.
+  - `scripts/explain_analyze.py` at 100k: Job Q1 173.256 -> 29.097 ms, Q2 88.122 -> 16.311 ms, Q3 84.783 -> 3.136 ms; Candidate Q1 60.519 -> 24.136 ms, Q2 76.225 -> 18.576 ms, Q3 91.586 -> 2.598 ms. Indexed plans show `Bitmap Index Scan on jobs_search_vector_gin` / `cjobs_search_vector_gin` / `jobs_skills_gin`.
+  - Live through the dev stack: `GET :3001/jobs?q=python%20engineer` -> `total: 3707`; `GET :3002/jobs?q=kubernetes&employmentType=CONTRACT` -> `total: 1584`; hostile `q` -> 200; bad `employmentType` -> 400.
+- Not done / left half-way: M5 has no P1 items. The dev stack is running with 100k seeded rows in both databases (do not re-seed blindly: `--count` is additive).
+- Gotchas/decisions added: `SET LOCAL` no-op outside a transaction -> session `SET` + `RESET`; psycopg3 has no `copy_expert` -> `cursor.copy()`; `auto_now` columns have no DB default so raw COPY must supply them; per-service column intersection via `information_schema`; `NULLS LAST` required for browse; Seq Scan at small row counts is correct; search SQL duplicated per service (I1).
+- Next session should start with: M6 — Job Service `GET /internal/jobs/snapshot?after&limit` (keyset, non-DRAFT, full payloads, token-guarded), the Candidate reconciler (full + incremental, `reconcile_runs`, `POST /internal/admin/reconcile`, `GET /internal/admin/sync-status`) reusing `upsert_job_from_snapshot`, `scripts/replay_dlq.py` + `POST /internal/admin/dlq/replay`, the `e2e/` scenarios A-E, and `docs/outage-recovery.md` with real transcripts.

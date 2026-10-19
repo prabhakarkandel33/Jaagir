@@ -21,5 +21,6 @@ urlpatterns = [
         views.JobCloseView.as_view(),
         name="recruiter-job-close",
     ),
+    path("jobs", views.PublicJobSearchView.as_view(), name="public-job-search"),
     path("jobs/<uuid:job_id>", views.PublicJobDetailView.as_view(), name="public-job-detail"),
 ]

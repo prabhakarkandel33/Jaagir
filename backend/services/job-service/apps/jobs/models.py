@@ -6,7 +6,11 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 
 class JobStatus(models.TextChoices):
@@ -56,6 +60,11 @@ class Job(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Maintained by a BEFORE INSERT OR UPDATE trigger (migration 0002). A
+    # GENERATED column is impossible here because array_to_string is only
+    # STABLE (ARCHITECTURE.md section 7).
+    search_vector = SearchVectorField(null=True, editable=False)
+
     class Meta:
         db_table = "jobs"
         indexes = [
@@ -67,6 +76,23 @@ class Job(models.Model):
                 fields=["status", "-published_at"],
                 name="jobs_status_published_idx",
             ),
+            # Partial GIN: only PUBLISHED rows are searchable, so the index is
+            # smaller. The query must contain the literal predicate
+            # `status = 'PUBLISHED'` or the planner cannot use it.
+            GinIndex(
+                fields=["search_vector"],
+                condition=Q(status="PUBLISHED"),
+                name="jobs_search_vector_gin",
+            ),
+            GinIndex(fields=["skills"], name="jobs_skills_gin"),
+            # Browse (empty query) and stable tie-breaking.
+            models.Index(
+                fields=["-published_at", "id"],
+                condition=Q(status="PUBLISHED"),
+                name="jobs_pub_browse_idx",
+            ),
+            models.Index(fields=["employment_type"], name="jobs_employment_idx"),
+            models.Index(Lower("location"), name="jobs_location_lower_idx"),
         ]
         constraints = [
             models.CheckConstraint(
