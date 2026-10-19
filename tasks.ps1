@@ -59,8 +59,8 @@ switch ($Target) {
     }
     'typecheck' {
         Invoke-In $Backend { uv run mypy packages/contracts/src }
-        Invoke-In $Backend { uv run mypy services/job-service }
-        Invoke-In $Backend { uv run mypy services/candidate-service }
+        Invoke-In $Job { uv run mypy --config-file mypy.ini . }
+        Invoke-In $Cand { uv run mypy --config-file mypy.ini . }
     }
     'test' {
         Invoke-In $Contracts { uv run pytest -q }

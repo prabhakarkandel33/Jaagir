@@ -32,6 +32,7 @@ dev = [
 line-length = 100
 target-version = "py312"
 src = ["packages", "services"]
+extend-exclude = ["**/migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "DJ", "S", "C4", "SIM", "RUF"]
@@ -44,6 +45,8 @@ ignore = [
 "**/migrations/*.py" = ["E501"]
 "**/tests/**" = ["S101", "S105", "S106"]
 "**/config/settings/*.py" = ["E402", "F401", "F403", "F405"]
+# Django Meta options and REQUIRED_FIELDS are class-level by design.
+"**/models.py" = ["RUF012", "DJ001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["config", "contracts", "apps"]

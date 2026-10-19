@@ -30,6 +30,9 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "apps.core",
+    "apps.recruiters",
+    "apps.jobs",
+    "apps.outbox",
 ]
 
 MIDDLEWARE = [
@@ -66,6 +69,9 @@ TIME_ZONE = "UTC"
 USE_I18N = False
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# The recruiter is the Django auth user in this service.
+AUTH_USER_MODEL = "recruiters.Recruiter"
 
 # Request body limit (AGENTS.md section 2 hardening).
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.body_max_bytes

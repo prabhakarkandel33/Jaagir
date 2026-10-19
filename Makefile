@@ -52,8 +52,8 @@ lint:
 
 typecheck:
 	cd $(BACKEND) && uv run mypy packages/contracts/src
-	cd $(BACKEND) && uv run mypy services/job-service
-	cd $(BACKEND) && uv run mypy services/candidate-service
+	cd $(JOB) && uv run mypy --config-file mypy.ini .
+	cd $(CAND) && uv run mypy --config-file mypy.ini .
 
 test:
 	cd $(CONTRACTS) && uv run pytest -q

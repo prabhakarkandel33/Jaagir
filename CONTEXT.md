@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M1
-State             : IN PROGRESS
-Last session      : S1 (2026-10-18)
-Next action       : Finish M1 scaffold -> make infra-up && make migrate && make verify
-Last green verify : never
+Current milestone : M2
+State             : IN PROGRESS (data layer done; auth endpoints next)
+Last session      : S2 (2026-10-19)
+Next action       : M2 recruiter register/login + GET|PUT /recruiters/me
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 14 + 5)
 ```
 
-Progress: `[~] M0  [~] M1  [ ] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [~] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -60,7 +60,8 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
 - **Acceptance:** `make infra-up && make migrate && make verify` all green; `curl -sf localhost:3001/healthz` and `:3002/healthz` OK while `make dev` runs; each service's migrations touch only its own DB.
 
 ### M2: Job Service core
-- [ ] Migrations: `recruiters`, `jobs` (+ `version`, status check constraints), `outbox_events` (+ partial index). Search columns come in M5 (do not add now).
+- [x] Migrations: `recruiters`, `jobs` (+ `version`, status check constraints), `outbox_events` (+ partial index). Search columns come in M5 (do not add now).
+  - [2026-10-19] Done in job-service: `apps/recruiters/models.py` (custom `AUTH_USER_MODEL`, UUID PK, lower(email) unique), `apps/jobs/models.py` (status/employment check constraints, `jobs_version_positive`), `apps/outbox/models.py` (partial index `outbox_pending_idx`). Tests in `tests/test_models.py` (9 cases) assert constraints at DB level; `uv run pytest -q` -> 14 passed.
 - [ ] Recruiter register/login (argon2id, JWT signing, key from env as base64 PEM), `GET|PUT /recruiters/me`.
 - [ ] Job commands: create (DRAFT), update, publish, close with the state machine (`DRAFT->PUBLISHED->CLOSED`; illegal transitions -> 409 `INVALID_STATE_TRANSITION`), ownership enforced (other recruiter's job -> 404), `version = version + 1` on every write.
 - [ ] `withTx(fn)` helper; publish/update-while-published/close insert an outbox row **in the same tx** (envelope from `packages/contracts`, payload = full snapshot).
@@ -177,12 +178,21 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-18, M1] Windows dev box has no `make`; `tasks.ps1` is the local equivalent and mirrors every target. CI uses `Makefile` on Ubuntu.
 - [2026-10-18, M1] `GET /docs` returned 500 `TemplateDoesNotExist: drf_spectacular/swagger_ui.html`. Cause: `TEMPLATES = []`. Fix: enable `DjangoTemplates` with `APP_DIRS: True` in both `config/settings/base.py`; regression test added (`test_swagger_ui_is_served`).
 - [2026-10-18, M1] In PowerShell `curl` is an alias for `Invoke-WebRequest` (prompts, parses HTML). Use `curl.exe` for raw checks.
+- [2026-10-19, M2] Switching `AUTH_USER_MODEL` after `auth` migrations were applied breaks `migrate` history. Fix: wipe the dev volumes once (`docker compose -f deploy/docker-compose.dev.yml down -v` then `up -d --wait`) and re-run `migrate`; no data existed. Do this before M2 auth work on any old dev DB.
+- [2026-10-19, M2] Django requires `USERNAME_FIELD` to carry `unique=True` (`auth.E003`), so `email` has both a field-level unique constraint and a functional `Lower("email")` constraint. Writes go through `RecruiterManager`, which lowercases the address.
+- [2026-10-19, M2] mypy without the django-stubs plugin reports `var-annotated` on every model field. Fix: per-service `mypy.ini` enables `mypy_django_plugin.main` with `django_settings_module = config.settings.test`, and `tasks.ps1`/`Makefile` run mypy from each service directory. Contracts still check from `backend/` without the plugin.
+- [2026-10-19, M2] `config/settings/test.py` uses the MD5 hasher for speed, so the argon2 assertion uses `@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.Argon2PasswordHasher"])`.
+- [2026-10-19, M2] Generated migrations are excluded from ruff (`extend-exclude = ["**/migrations"]`); `models.py` ignores `RUF012`/`DJ001` because Django `Meta` options and nullable `last_error` are intentional.
 
 ---
 
 ## 5. Decisions log (append-only)
 
 Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
+
+- [2026-10-19, M2] The recruiter IS the Django auth user (`AUTH_USER_MODEL = recruiters.Recruiter`, `AbstractBaseUser`). Why: SimpleJWT, argon2id hashing, and `last_login` work without a second profile table. Rejected: `auth.User` + `Recruiter` profile (two tables, needless join).
+- [2026-10-19, M2] UUID primary keys use Python-side `uuid.uuid4`, not `gen_random_uuid()`. Why: no DB default needed, works in bulk tests without a round trip. Rejected: `db_default` (harder to introspect, migration noise).
+
 
 - [design] Stack = Node 22/TypeScript/Fastify/raw SQL. Why: fast agent iteration, ~half the RAM of a JVM stack, full SQL control for FTS/outbox. Rejected: Spring Boot (RAM, slower iteration), ORMs (hide FTS/outbox semantics).
 - [design] Search implemented in both services (Job Service `GET /jobs`, Candidate Service `GET /jobs` over replica). Why: the assignment says the Job Service exposes search *and* that the candidate replica exists so candidates can search/apply; also keeps candidate search alive during Job Service downtime.
@@ -241,3 +251,13 @@ Template:
 - Not done / left half-way: `docs/PROPOSAL.md` (M0), Dockerfiles (M7), integration + Docker-build + e2e CI jobs (M7), JWT keypairs (M2), `make` is not installed on this Windows box (use `tasks.ps1`).
 - Gotchas/decisions added: stack-change decisions; "tests are real-behavior only"; non-package workspace members; `uv sync --all-packages`; pydantic `PostgresDsn.parsed`; mypy duplicate `apps`; Django 6 pin; drf-spectacular content-type.
 - Next session should start with: confirm `make`/`tasks.ps1 dev` serves `/healthz` on 3001 and 3002, tick M1, then write `docs/PROPOSAL.md` (M0) before starting M2.
+
+### Session 2: 2026-10-19: M2 (data layer)
+- Did: fixed the `/docs` 500 (`TEMPLATES` was empty) and added a regression test; added `apps/recruiters/models.py` (custom `AUTH_USER_MODEL`), `apps/jobs/models.py`, `apps/outbox/models.py` with their initial migrations; enabled the django-stubs mypy plugin per service; excluded generated migrations from ruff; added `tests/test_models.py`.
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "64 files already formatted", mypy "Success" x3, pytest 11 + 14 + 5 passed.
+  - `uv run python manage.py migrate` on a fresh `job_db` -> recruiters, jobs, outbox migrations applied.
+  - `curl.exe` after the settings fix -> `/docs` 200 on :3001 and :3002.
+- Not done / left half-way: M2 auth (`register`, `login`, `GET|PUT /recruiters/me`), job command endpoints, `withTx`, outbox inserts on publish/update/close, recruiter list, public `GET /jobs/:id`, throttling/OpenAPI for these routes. `docs/PROPOSAL.md` (M0) still blocked on `docs/ASSIGNMENT.md`.
+- Gotchas/decisions added: `TEMPLATES` empty breaks Swagger UI; `curl` alias; AUTH_USER_MODEL switch needs fresh dev DB; USERNAME_FIELD must be `unique=True`; django-stubs plugin per-service; MD5 test hasher vs argon2 assertion; ruff excludes migrations; recruiter = auth user; Python-side UUIDs.
+- Next session should start with: M2 auth endpoints in `apps/recruiters` (serializers, views, urls, SimpleJWT signing from base64 PEM env), tests for register/login/me, then job commands + outbox in the same tx.
