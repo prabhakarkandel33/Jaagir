@@ -47,6 +47,9 @@ ignore = [
 "**/config/settings/*.py" = ["E402", "F401", "F403", "F405"]
 # Django Meta options and REQUIRED_FIELDS are class-level by design.
 "**/models.py" = ["RUF012", "DJ001"]
+# DRF serializers/views declare class-level lists/dicts by framework design.
+"**/serializers.py" = ["RUF012"]
+"**/views.py" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["config", "contracts", "apps"]

@@ -10,10 +10,10 @@ Living project memory and **the work queue**. Every session reads this first and
 
 ```
 Current milestone : M2
-State             : IN PROGRESS (data layer done; auth endpoints next)
-Last session      : S2 (2026-10-19)
-Next action       : M2 recruiter register/login + GET|PUT /recruiters/me
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 14 + 5)
+State             : IN PROGRESS (auth endpoints done; job commands next)
+Last session      : S3 (2026-10-19)
+Next action       : M2 job commands (create DRAFT, update, publish, close) + `withTx` + outbox insert in the same tx
+Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 25 + 5)
 ```
 
 Progress: `[~] M0  [x] M1  [~] M2  [ ] M3  [ ] M4  [ ] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
@@ -62,7 +62,8 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
 ### M2: Job Service core
 - [x] Migrations: `recruiters`, `jobs` (+ `version`, status check constraints), `outbox_events` (+ partial index). Search columns come in M5 (do not add now).
   - [2026-10-19] Done in job-service: `apps/recruiters/models.py` (custom `AUTH_USER_MODEL`, UUID PK, lower(email) unique), `apps/jobs/models.py` (status/employment check constraints, `jobs_version_positive`), `apps/outbox/models.py` (partial index `outbox_pending_idx`). Tests in `tests/test_models.py` (9 cases) assert constraints at DB level; `uv run pytest -q` -> 14 passed.
-- [ ] Recruiter register/login (argon2id, JWT signing, key from env as base64 PEM), `GET|PUT /recruiters/me`.
+- [x] Recruiter register/login (argon2id, JWT signing, key from env as base64 PEM), `GET|PUT /recruiters/me`.
+  - [2026-10-19] Done in job-service: `apps/recruiters/{serializers,services,views,urls}.py`, `apps/core/throttling.py` (`AuthRateThrottle`, scope `auth` = 10/min), `config/env.decode_pem` (base64 PEM decoded at boot), `SIMPLE_JWT` uses decoded keys + `USER_ID_CLAIM="sub"`. Routes: `POST /auth/recruiters/register`, `POST /auth/recruiters/login`, `GET|PUT /recruiters/me`. Tests `tests/test_auth.py` (11 cases). Live-verified over HTTP on :3001 (register 201, duplicate 409 `EMAIL_ALREADY_EXISTS`, login 200, `/me` 200, bad login 401 `INVALID_CREDENTIALS`). `spectacular --validate --fail-on-warn` -> exit 0.
 - [ ] Job commands: create (DRAFT), update, publish, close with the state machine (`DRAFT->PUBLISHED->CLOSED`; illegal transitions -> 409 `INVALID_STATE_TRANSITION`), ownership enforced (other recruiter's job -> 404), `version = version + 1` on every write.
 - [ ] `withTx(fn)` helper; publish/update-while-published/close insert an outbox row **in the same tx** (envelope from `packages/contracts`, payload = full snapshot).
 - [ ] Recruiter list with pagination; public `GET /jobs/:id` returns PUBLISHED only.
@@ -183,6 +184,11 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M2] mypy without the django-stubs plugin reports `var-annotated` on every model field. Fix: per-service `mypy.ini` enables `mypy_django_plugin.main` with `django_settings_module = config.settings.test`, and `tasks.ps1`/`Makefile` run mypy from each service directory. Contracts still check from `backend/` without the plugin.
 - [2026-10-19, M2] `config/settings/test.py` uses the MD5 hasher for speed, so the argon2 assertion uses `@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.Argon2PasswordHasher"])`.
 - [2026-10-19, M2] Generated migrations are excluded from ruff (`extend-exclude = ["**/migrations"]`); `models.py` ignores `RUF012`/`DJ001` because Django `Meta` options and nullable `last_error` are intentional.
+- [2026-10-19, M2] `ApiError` (config/exceptions.py) MUST set `self.status_code` in `__init__`. DRF reads `status_code` from the instance/class, not from `code`; passing the HTTP status as DRF's `code=` string arg left every domain error at HTTP 500 (envelope was right, status was wrong). Fixed by setting `self.status_code = http_status`.
+- [2026-10-19, M2] SimpleJWT's `USER_ID_CLAIM` defaults to `user_id`, not `sub`. ARCHITECTURE.md section 9 requires `sub`, so `SIMPLE_JWT["USER_ID_CLAIM"] = "sub"` is set in `config/settings/base.py`.
+- [2026-10-19, M2] ES256/RS256 signing needs PyJWT's crypto backend: added `cryptography>=43` to `job-service` deps (was absent; tokens would raise at sign time).
+- [2026-10-19, M2] Test JWT keys: `config/settings/test.py` generates an ephemeral ES256 keypair at import and overrides `SIMPLE_JWT`, so tests never need provisioned `.env` keys. Dev keys live in the git-ignored `.env` as base64 PEM.
+- [2026-10-19, M2] PowerShell mangles inline JSON for `curl.exe` (`"` escaping). Use `--data-binary "@file.json"` with a temp file for HTTP checks instead of `-d "{...}"`.
 
 ---
 
@@ -192,6 +198,7 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 
 - [2026-10-19, M2] The recruiter IS the Django auth user (`AUTH_USER_MODEL = recruiters.Recruiter`, `AbstractBaseUser`). Why: SimpleJWT, argon2id hashing, and `last_login` work without a second profile table. Rejected: `auth.User` + `Recruiter` profile (two tables, needless join).
 - [2026-10-19, M2] UUID primary keys use Python-side `uuid.uuid4`, not `gen_random_uuid()`. Why: no DB default needed, works in bulk tests without a round trip. Rejected: `db_default` (harder to introspect, migration noise).
+- [2026-10-19, M2] Auth endpoints return a single access token (no refresh endpoint). Why: assignment only needs login -> access token; `role`/`iss`/`sub` claims are the contract (ARCHITECTURE.md section 9). Rejected: exposing SimpleJWT refresh flow (extra surface, not required).
 
 
 - [design] Stack = Node 22/TypeScript/Fastify/raw SQL. Why: fast agent iteration, ~half the RAM of a JVM stack, full SQL control for FTS/outbox. Rejected: Spring Boot (RAM, slower iteration), ORMs (hide FTS/outbox semantics).
@@ -261,3 +268,13 @@ Template:
 - Not done / left half-way: M2 auth (`register`, `login`, `GET|PUT /recruiters/me`), job command endpoints, `withTx`, outbox inserts on publish/update/close, recruiter list, public `GET /jobs/:id`, throttling/OpenAPI for these routes. `docs/PROPOSAL.md` (M0) still blocked on `docs/ASSIGNMENT.md`.
 - Gotchas/decisions added: `TEMPLATES` empty breaks Swagger UI; `curl` alias; AUTH_USER_MODEL switch needs fresh dev DB; USERNAME_FIELD must be `unique=True`; django-stubs plugin per-service; MD5 test hasher vs argon2 assertion; ruff excludes migrations; recruiter = auth user; Python-side UUIDs.
 - Next session should start with: M2 auth endpoints in `apps/recruiters` (serializers, views, urls, SimpleJWT signing from base64 PEM env), tests for register/login/me, then job commands + outbox in the same tx.
+
+### Session 3: 2026-10-19: M2 (auth slice)
+- Did: implemented the M2 auth slice in job-service: `apps/recruiters/{serializers,services,views,urls}.py` (`RegisterSerializer`, `LoginSerializer`, `RecruiterSerializer`, `RecruiterUpdateSerializer`), `apps/core/throttling.py` (`AuthRateThrottle` scope `auth` = 10/min), `config/env.decode_pem` + `jwt_*_pem` properties (base64 PEM decoded at boot), `SIMPLE_JWT` wired to the decoded keys with `USER_ID_CLAIM="sub"`, `cryptography>=43` added to deps, routes included from `config/urls.py`, and `tests/test_auth.py` (11 cases). Fixed `ApiError` to set `self.status_code`.
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "70 files already formatted", mypy "Success" x3, pytest 11 + 25 + 5 passed.
+  - Live on :3001 (`curl.exe --data-binary @file`): register 201 (token has `sub`/`role`/`iss`), duplicate 409 `EMAIL_ALREADY_EXISTS`, login 200, `/me` 200, bad login 401 `INVALID_CREDENTIALS`.
+  - `uv run python manage.py spectacular --validate --fail-on-warn` -> exit 0 (no schema warnings).
+- Not done / left half-way: job command endpoints (create DRAFT, update, publish, close) + state machine, `withTx`, outbox inserts on publish/update-while-published/close, recruiter list, public `GET /jobs/:id`. Dev JWT keypair generated and written to the git-ignored `.env`; `.env.example` keeps empty placeholders.
+- Gotchas/decisions added: `ApiError` must set `self.status_code` (DRF uses the instance attr, not `code`); SimpleJWT `USER_ID_CLAIM` is `user_id` by default (set to `sub`); ES256 needs `cryptography`; test settings generate an ephemeral keypair; PowerShell mangles inline curl JSON (use `--data-binary @file`); ruff RUF012 false positives in serializers/views ignored.
+- Next session should start with: M2 job commands in `apps/jobs` (serializers + services + `withTx` in the same transaction as the outbox insert), state machine `DRAFT->PUBLISHED->CLOSED`, ownership 404, `version` bump on every write, and the M2 acceptance tests (rollback leaves no outbox row and no job change; draft edits emit nothing).

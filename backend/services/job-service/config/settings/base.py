@@ -95,6 +95,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/min",
         "user": "600/min",
+        # Tighter bucket for credential endpoints (register/login).
+        "auth": "10/min",
     },
     # Pagination default per AGENTS.md section 6 (page / pageSize).
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.PageNumberPagination",
@@ -114,8 +116,11 @@ SIMPLE_JWT = {
     "ALGORITHM": env.jwt_algorithm,
     "ISSUER": env.jwt_issuer,
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
-    "SIGNING_KEY": env.jwt_signing_key,
-    "VERIFYING_KEY": env.jwt_public_key,
+    # ARCHITECTURE.md section 9: the subject claim is ``sub``.
+    "USER_ID_CLAIM": "sub",
+    # base64-of-PEM env values are decoded here (newlines survive).
+    "SIGNING_KEY": env.jwt_signing_key_pem,
+    "VERIFYING_KEY": env.jwt_public_key_pem,
 }
 
 LOGGING = build_logging_config(env.log_level)
