@@ -10,7 +10,10 @@ from apps.candidates.models import Candidate
 
 
 class CandidateSerializer(serializers.ModelSerializer[Candidate]):
-    """Public candidate profile. Never exposes the password hash."""
+    """Candidate profile. Never exposes the password hash or a media path."""
+
+    has_resume = serializers.SerializerMethodField()
+    resume_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -24,10 +27,22 @@ class CandidateSerializer(serializers.ModelSerializer[Candidate]):
             "skills",
             "summary",
             "resume_url",
+            "resume_filename",
+            "resume_uploaded_at",
+            "has_resume",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_has_resume(self, obj: Candidate) -> bool:
+        return bool(obj.resume_file)
+
+    def get_resume_url(self, obj: Candidate) -> str:
+        # Guarded endpoint, not a media URL. Empty when nothing is uploaded.
+        if obj.resume_file:
+            return "/candidates/me/resume"
+        return obj.resume_url
 
 
 class RegisterSerializer(serializers.Serializer[Any]):
@@ -46,6 +61,15 @@ class LoginSerializer(serializers.Serializer[Any]):
 
     def validate_email(self, value: str) -> str:
         return value.strip().lower()
+
+
+class RefreshSerializer(serializers.Serializer[Any]):
+    refresh = serializers.CharField()
+
+
+class ResumeUploadSerializer(serializers.Serializer[Any]):
+    # Empty files reach ``resume.validate_pdf`` so the error code stays stable.
+    file = serializers.FileField(allow_empty_file=True)
 
 
 class CandidateUpdateSerializer(serializers.ModelSerializer[Candidate]):

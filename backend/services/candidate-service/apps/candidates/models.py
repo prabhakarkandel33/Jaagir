@@ -16,6 +16,12 @@ from django.db import models
 from django.db.models.functions import Lower
 
 
+def resume_upload_path(instance: Candidate, filename: str) -> str:
+    """Random stored name: a resume can never be fetched by guessing a path."""
+    del instance, filename
+    return f"resumes/{uuid4().hex}.pdf"
+
+
 class CandidateManager(BaseUserManager["Candidate"]):
     use_in_migrations = True
 
@@ -59,8 +65,17 @@ class Candidate(AbstractBaseUser):
         blank=True,
     )
     summary = models.TextField(blank=True, default="")
-    # Resume is a URL string only (ARCHITECTURE.md section 13).
+    # Optional external resume link plus an optional uploaded PDF (M7A
+    # exception to ARCHITECTURE.md section 13). Media is never served directly.
     resume_url = models.URLField(max_length=500, blank=True, default="")
+    resume_file = models.FileField(
+        upload_to=resume_upload_path,
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    resume_filename = models.CharField(max_length=255, blank=True, default="")
+    resume_uploaded_at = models.DateTimeField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

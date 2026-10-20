@@ -62,6 +62,54 @@ def test_login_and_me_round_trip() -> None:
     assert me.json()["email"] == "me@example.com"
 
 
+def test_refresh_returns_access_with_role_and_issuer() -> None:
+    candidate = Candidate.objects.create_user(
+        email="refresh@example.com", password="correct horse battery"
+    )
+    login = APIClient().post(
+        "/auth/candidates/login",
+        {"email": candidate.email, "password": "correct horse battery"},
+        format="json",
+    )
+    assert login.status_code == 200
+    assert login.json()["refresh"]
+
+    response = APIClient().post(
+        "/auth/candidates/refresh",
+        {"refresh": login.json()["refresh"]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = jwt.decode(response.json()["access"], options={"verify_signature": False})
+    assert payload["role"] == "candidate"
+    assert payload["iss"] == "candidate-service"
+    assert response.json()["refresh"]
+
+
+def test_refresh_rejects_a_job_service_token() -> None:
+    now = timezone.now()
+    payload = {
+        "sub": str(uuid4()),
+        "jti": str(uuid4()),
+        "role": "candidate",
+        "iss": "job-service",
+        "iat": now,
+        "exp": now + timedelta(days=7),
+        "token_type": "refresh",
+    }
+    foreign = jwt.encode(payload, settings.JOB_SERVICE_TEST_SIGNING_KEY, algorithm="ES256")
+
+    response = APIClient().post(
+        "/auth/candidates/refresh",
+        {"refresh": foreign},
+        format="json",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_REFRESH_TOKEN"
+
+
 def test_bad_login_is_401() -> None:
     Candidate.objects.create_user(email="bad@example.com", password="correct horse battery")
     client = APIClient()

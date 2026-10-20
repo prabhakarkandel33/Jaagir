@@ -9,15 +9,15 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M7
-State             : IN PROGRESS (frontend image + public site + admin console done; prod compose, Caddy, deploy scripts, CI pending)
-Last session      : S11 (2026-10-20)
-Next action       : M7: prod Dockerfiles for both Django services, deploy/docker-compose.prod.yml, deploy/Caddyfile, deploy/scripts/*, ci.yml + deploy.yml, docs/deployment.md
-Last green verify : 2026-10-20 (ruff clean, format 145 files, mypy x3 Success, pytest 11 + 85 + 60 = 156)
+Current milestone : M7A
+State             : IN PROGRESS (Phase 1 backend DONE 2026-10-20; Phase 2 frontend foundation NEXT)
+Last session      : S13 (2026-10-20, Phase 1 backend)
+Next action       : Phase 2 frontend foundation: react-router-dom, lib/session.tsx, PublicShell/PortalShell, guards, signed-in redirects, real /jobs/:id page
+Last green verify : 2026-10-20 (ruff clean, format 150 files, mypy x3 Success, pytest 11 + 89 + 78 = 178)
 Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
-Frontend          : two worlds: public site (warm paper, no jargon) + `/admin` ops console (dark, technical); live search, side-by-side role detail, README screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean
+Frontend          : three surfaces: public site (warm paper), signed-in recruiter/candidate portals (same warm tokens, sidebar/tabs), `/admin` ops console (dark); react-router-dom with session guards and silent refresh; CV upload/preview; 1440 + 500 px screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean
 
-Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [x] M7A  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -31,6 +31,7 @@ Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [ ] M7  [ ] M
 | S4 | M5 | Search + 100k benchmark |
 | S5 | M6 | Reconciliation + outage proof (**the most important milestone; give it a fresh session**) |
 | S6 | M7 | Docker + CI/CD |
+| S12 | M7A | Portal overhaul, human-requested (2-3 sessions; backend first, then frontend) |
 | S7 | M8 | VPS deploy (human-gated) |
 | S8 | M9 | Docs + requirements audit |
 
@@ -139,6 +140,81 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
   - [2026-10-20] Written with the full captured transcript, timings per scenario, the three-run stability line, and the operations table (outbox backlog, reconcile, sync-status, replay).
 - **Acceptance:** `make e2e` all scenarios pass **three runs in a row** (flakiness check); `docs/outage-recovery.md` contains real transcripts. Record any flake root cause in Gotchas.
   - [2026-10-20] Run 1 `5/5 in 110.3s`, run 2 `5/5 in 110.3s`, run 3 `5/5 in 101.8s` (fresh stack each time). A fourth run after BOM/format cleanup: `5/5 in 240.5s` (slower host under load, no functional change). Flake root causes are in Gotchas (docker-exec Kafka helper hang; unbounded DLQ replay loop).
+
+### M7A: Portal overhaul (human-requested, before M7 infra)
+
+Goal: replace the one-page public portals with LinkedIn-style multipage flows, add applicant profiles and CV upload/preview, and keep sessions alive. The public site and `/admin` keep their current design. Resume M7 only after M7A is green.
+
+**Locked decisions (human, 2026-10-20):**
+- CV = PDF only, max 5 MB, stored by the Candidate Service. Human-directed exception to ARCHITECTURE.md §13 ("no file uploads", resume URL only); record in Decisions and update §4.2/§10/§13.
+- Session = access token 1 h + refresh token 7 days (`POST /auth/{recruiters,candidates}/refresh` in each service).
+- Router = `react-router-dom` (nested layouts, params, redirects).
+- Recruiters may change applicant status (`IN_REVIEW`, `SHORTLISTED`, `REJECTED`, `ACCEPTED`).
+- One active role per browser: signing in as recruiter clears the candidate session and the reverse also holds.
+- Signed-in users are redirected away from `/`, `/me`, `/employers` to their dashboard.
+- Recruiters see applicant name/email/phone/headline/skills/summary/CV only for candidates who applied to that recruiter's jobs.
+
+**Data + storage (candidate-service):**
+- [x] Add `resume_file` (FileField, random `resumes/<uuid>.pdf`), `resume_filename` (sanitized display name), `resume_uploaded_at` to `apps/candidates/models.py`; migration `candidates.0002_*` (new file only; I5).
+- [x] `MEDIA_ROOT` from env (dev: `<service>/media`, git-ignored); `RESUME_MAX_BYTES=5242880`; add `.env.example` entries.
+- [x] Validate PDF magic (`%PDF-`), non-empty, size <= 5 MiB -> 400 `INVALID_RESUME_FILE` / `RESUME_TOO_LARGE`; store random filename, delete the old file on replace/remove.
+- [x] Never serve media via `MEDIA_URL`; use guarded `FileResponse` with `application/pdf`, `X-Content-Type-Options: nosniff`, `Content-Disposition: attachment`.
+  - [2026-10-20, S13] `apps/candidates/models.py::resume_upload_path` (uuid name), migration `candidates.0002_resume_file` applied to `candidate_db`; `MEDIA_ROOT`/`RESUME_MAX_BYTES` in `config/env.py` + settings; media dirs are git-ignored by the existing `media/` rule. `apps/candidates/resume.py` validates size/magic, stores the sanitized display name, deletes replaced/removed files, and streams `FileResponse` with `nosniff` + `attachment`. Empty uploads stay `INVALID_RESUME_FILE` (`allow_empty_file=True` in the serializer); oversized uploads return `RESUME_TOO_LARGE`. Live smoke on :3002: upload 200 `has_resume=true`, download 200 `%PDF-` with the expected headers, refresh 200.
+
+**Backend endpoints (all with `extend_schema`, OpenAPI clean):**
+- [x] Job: `GET /recruiter/dashboard` -> `{jobs:{total,byStatus},recentJobs}`.
+- [x] Job: `POST /auth/recruiters/refresh` (own signing key; access carries `role`/`iss`).
+- [x] Candidate: `GET /candidates/me/dashboard` -> `{applications:{total,byStatus},recent}`.
+- [x] Candidate: `GET /recruiter/dashboard` -> `{applications:{total,byStatus,newCount},recent}` (recruiter token; all owned jobs).
+- [x] Candidate: `GET /recruiter/application-counts` -> `[{jobId,total,byStatus}]` for the recruiter's roles.
+- [x] Candidate: `GET /recruiter/applications/:id` -> application + nested candidate profile + job snapshot + CV flags; 404 for other recruiters.
+- [x] Candidate: `PATCH /recruiter/applications/:id/status` -> validate allowed statuses, ownership via `job.recruiter_id`, bump `status_updated_at`.
+- [x] Candidate: `GET /recruiter/applications/:id/resume` -> guarded PDF; 404 when missing/foreign.
+- [x] Candidate: `POST|DELETE /candidates/me/resume` (multipart `file`), `GET /candidates/me/resume`.
+- [x] Candidate: `POST /auth/candidates/refresh`.
+- [x] Extend `GET /recruiter/jobs/:jobId/applications` with nested candidate summary (`id, full_name, email, phone, headline, location, skills, summary, resume_url, resume_filename, has_resume`). Keep candidate history serializer lean.
+- [x] Keep dashboards single-DB (I1); counts use `values().annotate(Count(...))`, no cross-service SQL.
+  - [2026-10-20, S13] `apps/jobs/{services,serializers,views}.py` (Job dashboard), `apps/recruiters/{services,views,urls}.py` (refresh), `apps/applications/{services,serializers,views,urls}.py` (candidate/recruiter dashboards, all-applicants list, per-role counts, applicant detail, status PATCH, guarded resume). Auth responses now also return `refresh` + `refreshExpiresIn`; `SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"] = 7 days` in both services. `GET /recruiter/application-counts` is a top-level route (not under `/applications`). Foreign applications always 404 `APPLICATION_NOT_FOUND`.
+
+**Tests (mandatory):**
+- [x] Upload: valid PDF accepted; non-PDF rejected; > 5 MiB rejected; replace deletes old file; delete clears fields.
+- [x] Download: candidate self OK; recruiter only for own applicant; other recruiter 404; anonymous 401.
+- [x] Applicant detail/status: ownership, allowed/blocked statuses, timestamp bump.
+- [x] Dashboard counts (jobs by status, applications by status, per-role counts) match fixtures.
+- [x] Recruiter list exposes candidate name/CV flag; candidate history does not expose another candidate.
+- [x] Refresh: valid token returns access with `role`/`iss`; wrong-service token rejected.
+- [x] Existing reliability suites stay green.
+  - [2026-10-20, S13] New `candidate-service/tests/test_resume.py` (11), `tests/test_recruiter_portal.py` (6), `tests/test_auth.py` refresh cases (2); `job-service/tests/test_dashboard.py` (2), `tests/test_auth.py` refresh cases (2). `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178. Both `spectacular --validate --fail-on-warn` exit 0.
+
+**Frontend routes:**
+- Public: `/`, `/jobs`, `/jobs/:id` (real job page), `/employers` (auth), `/me` (auth).
+- Recruiter: `/employers/dashboard`, `/employers/profile`, `/employers/post`, `/employers/roles`, `/employers/roles/:id`, `/employers/roles/:id/edit`, `/employers/applicants`, `/employers/applicants/:applicationId`.
+- Candidate: `/me/dashboard`, `/me/profile`, `/me/applications`, `/me/applications/:id`.
+- [x] Add `react-router-dom`; `layouts/PublicShell.tsx` + `layouts/PortalShell.tsx` (sidebar/tabs, account menu, sign out).
+- [x] `lib/session.tsx`: access+refresh storage, refresh once on 401, cross-tab `storage` sync, sign-out, `?next=` redirects, guards (`RequireRecruiter`, `RequireCandidate`).
+- [x] Recruiter pages: dashboard stats + recent applicants; company profile; post role (save draft / publish now); roles list with per-role applicant counts; role detail + applicants; role edit; applicant detail with profile, cover letter, CV preview/download, status select.
+- [x] Candidate pages: dashboard (status counts, profile completeness, recent applications, recent roles); profile with CV upload/replace/remove/preview; applications list; application detail.
+- [x] Public: signed-in header shows Dashboard + Sign out; root `/` redirects by active role; `/me` and `/employers` redirect when already signed in.
+- [x] `Discover`: "View role" navigates to `/jobs/:id`; keep debounce/applied-filters/URL sync; job page applies with sign-in return.
+- [x] Split CSS: keep `public.css` for public/auth; add `portal.css` for the signed-in product (same warm tokens, not the admin theme).
+- [x] Responsive: sidebar -> tabs below 980 px; tables -> cards below 760 px; empty/error/loading states on every page.
+  - [2026-10-20, S14] All routes live on `:5174`: `App.tsx` uses pathless `RequireRole` + `PortalShell` layout routes with explicit children (a splat route outranked the exact `/employers`/`/me` sign-in routes and looped `?next=`). `lib/session.tsx` stores `jp.session`, single-flight refresh via `setTokenRefresher`, `storage` listener, `safeNext`. `npm run build` clean (73 modules, 349.8 kB JS / 46.6 kB CSS). Playwright walkthrough passed: guards, publish, apply, CV upload, status change, CV download, silent refresh, 500 px no overflow.
+
+**Acceptance:**
+- [x] `./tasks.ps1 verify` green (new backend tests included), migrations applied on both DBs, OpenAPI validation clean.
+  - [2026-10-20, S13] Verified. Phase 2/3 frontend acceptance items below are still open.
+- [x] `npm run build` clean; container rebuilt and healthy on `:5174`.
+- [x] Manual: recruiter register -> profile -> post -> publish -> candidate search -> upload CV -> apply -> recruiter dashboard counts -> role applicants show name -> applicant profile + CV -> status change -> candidate sees new status.
+- [x] Session: reload stays signed in; `/` and `/me`/`/employers` redirect correctly; expired access refreshes silently; sign out clears both tokens.
+- [x] Screenshots at 1440 px and 500 px for each portal page; no overflow; README updated.
+- [x] `make e2e` still 5/5 (reliability paths untouched).
+- [x] ARCHITECTURE.md updated (§4.2 fields, §8 endpoints, §10 media volume/backup, §13 exception); Decisions + Session log appended.
+  - [2026-10-20, S14] `npm run build` clean (73 modules, 349.8 kB JS / 46.6 kB CSS); `docker compose build frontend` + `up -d frontend` -> `(healthy)` on `:5174`.
+  - [2026-10-20, S14] Playwright (`uv run --no-project --with playwright`, bundled chromium) ran the whole flow with `rina.1792484373@example.com` / `aarav.1792484373@example.com` (`PortalCheck123!`): publish, apply, CV upload + download (`%PDF-`), applicant detail, status -> `SHORTLISTED` (candidate sees it), silent refresh (access token corrupted, `wait_for_function` proved a new one), reload persistence, signed-out redirects, sign-out, 500 px no overflow.
+  - [2026-10-20, S14] 16 portal screenshots at 1440 px + 500 px in `docs/screenshots/`; README "Signed-in portals" section added.
+  - [2026-10-20, S14] `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178. `./tasks.ps1 e2e` -> `5/5 scenarios passed in 207.0s`; final assertion `8 non-draft jobs identical in both databases`. E2E now publishes the frontend on `:15174` so it coexists with the dev stack on `:5174`.
+
+**Out of scope:** DOCX uploads, virus scanning, saved jobs, messaging, email notifications, S3/object storage.
 
 ### M7: Containerization and CI/CD
 - [x] Frontend image: `frontend/Dockerfile` (multi-stage `node:22-slim` build -> `nginxinc/nginx-unprivileged:1.27-alpine`, non-root uid 101, port 8080, `/healthz`, `HEALTHCHECK`), `frontend/nginx.conf` (SPA fallback, immutable `/assets` cache, security headers), `frontend/.dockerignore`, and a `frontend` service in `deploy/docker-compose.dev-full.yml` (`:5174`, waits for both web healthchecks).
@@ -272,6 +348,16 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-20, M7] The job list label showed the new query against the old totals (`209,168 roles for "python"` while typing). Cause: the label read the draft input but the list still held the previous response. Fix: `applied` filters state set at request start + a request sequence guard, and a 350 ms debounce so typing feels live but every count matches its rows.
 - [2026-10-20, M7] The role detail rendered after the list and pager, so "View role" forced a long scroll. Fix: two-column results grid with a sticky detail panel above 980 px, and `scrollIntoView` on selection below it.
 - [2026-10-20, M7] Back-to-back headless Edge `--screenshot` launches reuse the default profile; the second and later writes silently produce no file. Fix: give each capture a unique `--user-data-dir` and pause briefly between runs. Screenshots live in `docs/screenshots/`; capture sign-in screens only, never a signed-in session with tokens or personal data.
+- [2026-10-20, M7A] `manage.py spectacular --validate --fail-on-warn` was red for reasons unrelated to M7A: `/jobs` vs `/jobs/:id` both derived `jobs_retrieve`; the `status` enum collided between jobs and applications; the candidate service's custom `IssuerAwareJWTAuthentication` had no OpenAPI security extension; and the two internal admin POSTs declare only query parameters. Fixes: explicit `operation_id="jobs_search"`/`"jobs_detail"`; `ENUM_NAME_OVERRIDES` in both settings; `apps/core/schema.py` extension registered from `CoreConfig.ready`; `request=None` on those POST decorators.
+- [2026-10-20, M7A] DRF's `FileField` rejects an empty upload during serializer validation, so the view never reaches the domain check and returns `VALIDATION_ERROR`. Fix: `FileField(allow_empty_file=True)`; `resume.validate_pdf` then returns the contract code `INVALID_RESUME_FILE`.
+- [2026-10-20, M7A] Ruff `SIM115` wants a context manager around `open(path, "rb")` for `FileResponse`, but a `with` block would close the file before the response streams. Keep the open handle (FileResponse closes it) and mark the line `# noqa: SIM115`.
+- [2026-10-20, M7A] React Router v7 ranks a splat (`employers/*`) above the exact `/employers` sign-in route, so `RequireRole` bounced `/employers` -> `/employers?next=...` -> `/employers` forever (blank page, growing query string). Fix: use pathless layout routes with explicit child paths; never mix a splat and an exact auth route at the same prefix.
+- [2026-10-20, M7A] `signOut()` followed by `navigate("/")` loses the race with `RequireRole` and lands back on the sign-in page. Fix: `signOut(); window.location.replace("/")` in `PortalShell` (full reload also drops in-memory state).
+- [2026-10-20, M7A] A single-column `.portal-shell` grid stretches its auto rows to fill `min-height: 100vh`, so the sticky mobile header grew to ~266 px with a large gap (`gridTemplateRows: 110px 121px`). Fix: `.portal-side { align-self: start; align-content: start }` and `.portal-shell { grid-template-rows: auto minmax(0,1fr); align-content: start }` below 980 px.
+- [2026-10-20, M7A] Playwright `channel="msedge"` hangs on this box (no navigation, script timeout); the bundled chromium works: `uv run --no-project --with playwright python script.py` after `playwright install chromium`.
+- [2026-10-20, M7A] `make e2e` reuses `docker-compose.dev-full.yml`, which now includes the frontend on `${FRONTEND_PORT:-5174}`; that collides with the dev stack. `e2e/run_e2e.py` now sets `FRONTEND_PORT=15174` and points the Vite build args at `13001`/`13002`.
+- [2026-10-20, M7A] Docker Desktop returned `500 Internal Server Error` from `compose stop candidate-reconciler` during e2e scenario E, and two e2e containers disappeared. Cause: transient daemon fault with 21 containers across two projects. Fix: rerun; the full suite passed `5/5 in 207.0s`. Do not treat a single daemon 500 as a code failure.
+- [2026-10-20, M7A] `CONTEXT.md` had 756 characters of double-encoded mojibake (`Ãƒâ€šÃ‚Â§`) from earlier PowerShell round-trips. Fixed once with `ftfy.fix_text` (read as UTF-8, write as UTF-8, LF); check with the `read` tool, not `Get-Content` (ANSI default misleads).
 
 ---
 
@@ -324,6 +410,16 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-20, M7] Job search runs live with a 350 ms debounce; the result count and the rows come from the same response, and the `q`/filter values are mirrored into the URL with `replaceState` (shareable links, no extra history entries). Why: the human reported a count that did not match the rows and asked for real-time search or an honest label. Rejected: keeping click-only search (slower), updating the label before the response (the original bug).
 - [2026-10-20, M7] Role detail sits beside the results in a sticky column above 980 px and scrolls into view on selection below it. Why: "View role" forced a long scroll past the list and pager. Rejected: a modal (hides context, extra focus handling).
 - [2026-10-20, M7] The account pages name their audience in the heading: "Job seeker sign in" at `/me`, "Employer sign in" at `/employers`, plus a cross-link ("Hiring instead?" / browse roles). Why: the human could not tell which account `/me` was for. Rejected: an eyebrow label above the heading (violates the public craft-floor rules).
+- [2026-10-20, M7A] CV upload is in scope despite ARCHITECTURE §13 ("no file uploads"): PDF only, max 5 MB, stored on the Candidate Service volume, served only through guarded endpoints. Why: explicit human request ("allow uploading cv pdfs"); a URL-only resume does not let recruiters inspect the CV. Rejected: DOCX (parsing risk), S3 (new infrastructure before M7/M8), public media URLs (leaks resumes). Consequence: §13 and the M7/M8 storage/backup tasks are updated.
+- [2026-10-20, M7A] Sessions use access 1 h + refresh 7 days in both services. Why: human wants reload and return visits to stay signed in, and the existing access-only token expires after an hour with no recovery. Rejected: longer access tokens (revocation impossible), cookie sessions (cross-origin frontend/API setup).
+- [2026-10-20, M7A] The SPA uses `react-router-dom` instead of the hand-written path switch. Why: nested layouts, URL params (`/employers/roles/:id`), guards and `?next=` redirects are first-class; the old switch cannot express them cleanly. Rejected: extending the custom router (more bespoke code, no params/history helpers).
+- [2026-10-20, M7A] One active identity per browser: signing in as a recruiter clears the candidate session and the reverse also holds. Why: prevents two contradictory dashboards and wrong-role API calls; matches the human's "logged in session be it a recruiter or a job seeker". Rejected: keeping both sessions with a role switch (ambiguous root redirect, confusing header).
+- [2026-10-20, M7A] A recruiter may read a candidate's name, email, phone, headline, skills, summary and CV **only** through applications to that recruiter's jobs. Why: hiring needs contact data, but the candidate profile must not become a public directory (I1/privacy). Enforced in the Candidate Service by `job.recruiter_id == token.sub`; foreign applications return 404.
+- [2026-10-20, M7A] `/jobs/:id` is a real, shareable job page; the side-by-side detail panel is retired. Why: LinkedIn-style multipage flow and deep links from applications/CVs need a stable URL; the sticky panel cannot be linked or refreshed. The search list keeps live debounce and applied-filter labels.
+- [2026-10-20, M7A] Recruiter status changes are `PATCH /recruiter/applications/:id/status` with the four post-submission statuses; `SUBMITTED` stays the apply default. Why: applicant tracking is the point of the recruiter portal; ownership and allowed values are validated server-side, `status_updated_at` is bumped.
+- [2026-10-20, M7A] Portal routes are a flat list under pathless layout routes (`RequireRole` + `PortalShell`), not nested splats. Why: React Router v7 ranks `employers/*` above the exact `/employers` sign-in route, which produced an infinite `?next=` loop. Rejected: nested splat layouts (correct-looking, but cannot host the same-prefix public sign-in page).
+- [2026-10-20, M7A] Sign out does a full reload (`window.location.replace("/")`) instead of a soft `navigate`. Why: the guard re-renders before the state update and sends the user back to the sign-in page. Rejected: `flushSync` or a delayed navigate (both brittle).
+- [2026-10-20, M7A] The e2e stack publishes the built frontend on `:15174` and points its build args at `:13001`/`:13002`. Why: the dev stack owns `:5174`, and the e2e run must not fail on a port clash before any reliability scenario starts.
 
 ---
 
@@ -477,3 +573,32 @@ Template:
 - Not done / left half-way: none in this slice. Admin dashboard after sign-in still not exercised in a real browser session. M7 prod images/compose/Caddy/scripts/CI still open.
 - Gotchas/decisions added: applied-filters label bug + sequence guard; sticky detail vs long scroll; unique `--user-data-dir` per headless capture. Decisions: live debounced search with URL sync; side-by-side detail; audience-named headings.
 - Next session should start with: M7 prod Dockerfiles for both Django services, `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`.
+
+### Session 12: 2026-10-20: M7A planning (no code)
+- Did: turned the human's portal feedback into the M7A milestone above (multipage recruiter/candidate flows, applicant profiles, CV upload/preview, refresh-token sessions, applicant status). Recorded the human decisions (PDF <= 5 MiB, refresh 7 days, `react-router-dom`, one active role, 404 privacy for foreign applicants) in the Decisions log. Updated ARCHITECTURE.md §4.2, §8, §9, §10, §11, §13 for the CV exception/media volume and the new endpoints. No production code changed.
+- Verified (commands + result): no code run; `git status` shows only docs changes from this planning step (plus the uncommitted S11 frontend work).
+- Not done / left half-way: implementation starts with the candidate resume model/migration and the guarded upload/download endpoints. M7 infra remains paused until M7A passes.
+- Gotchas/decisions added: decisions M7A x8 (CV exception, refresh sessions, router, single identity, applicant privacy, `/jobs/:id`, recruiter status change).
+- Next session should start with: M7A backend. Read this milestone, then add `resume_file`/`resume_filename`/`resume_uploaded_at` + migration, the multipart upload/delete/download endpoints with PDF magic + 5 MiB checks and tests, then dashboards + applicant detail/status + refresh tokens. Do not start the frontend rewrite before those endpoints return real data.
+
+### Session 13: 2026-10-20: M7A Phase 1 (backend)
+- Did: resume storage (`apps/candidates/models.py` random `resumes/<uuid>.pdf`, `resume_filename`, `resume_uploaded_at`; migration `candidates.0002_resume_file`), env/settings (`MEDIA_ROOT`, `RESUME_MAX_BYTES`), guarded `apps/candidates/resume.py` (PDF magic, size, delete-on-replace/remove, `FileResponse` + `nosniff` + `attachment`), candidate resume routes, recruiter applicant list/detail/status/resume routes, candidate and recruiter dashboards, per-role applicant counts, refresh tokens in both services (1 h access / 7 days refresh) and auth responses carrying `refresh`/`refreshExpiresIn`. Fixed OpenAPI validation (operation ids, enum overrides, auth extension, internal POST `request=None`).
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178.
+  - `./tasks.ps1 migrate` -> `candidates.0002_resume_file` applied to `candidate_db` (job DB no migrations).
+  - `manage.py spectacular --validate --fail-on-warn` -> exit 0 for both services.
+  - Live smoke on :3002: register -> upload 200 `has_resume=true` -> download 200 `%PDF-` with `application/pdf`, `attachment`, `nosniff` -> refresh 200.
+- Not done / left half-way: Phase 2 frontend foundation (router, session, shells, guards, `/jobs/:id`) and Phase 3 portal pages; screenshots, container rebuild, manual walkthrough, e2e. No commit made.
+- Gotchas/decisions added: OpenAPI warning set + fixes; empty `FileField` needs `allow_empty_file=True`; `FileResponse` open handle vs `SIM115`.
+- Next session should start with: Phase 2. Add `react-router-dom`, `lib/session.tsx` (access+refresh, single-flight refresh on 401, storage sync, sign-out, `?next=`), `PublicShell`/`PortalShell`, route guards, signed-in redirects, and make `/jobs/:id` a real page. Do not touch `/admin`.
+### Session 14: 2026-10-20: M7A phases 2-3 (frontend) — M7A COMPLETE
+- Did: rewrote the SPA around `react-router-dom`: `App.tsx` route tree (pathless `RequireRole` + `PortalShell` layouts with explicit child paths), `layouts/{PublicShell,PortalShell}.tsx`, `lib/{session,api,types,useAsync,files,format}.ts(x)`, `views/public/{Jobs,JobDetail,RecruiterSignIn,CandidateSignIn}.tsx`, 12 `views/portal/*` pages (recruiter dashboard/roles/role/role-edit/applicants/applicant/profile/post; candidate dashboard/applications/application/profile), `portal.css` (~500 lines) and a README "Signed-in portals" section. Removed the pre-router `Discover.tsx`/`Recruiter.tsx`/`Candidate.tsx`.
+- Verified (commands + result):
+  - `npm run build` -> clean (73 modules, 349.8 kB JS / 46.6 kB CSS); `docker compose build frontend` + `up -d frontend` -> healthy on `:5174`.
+  - Playwright walkthrough (bundled chromium) -> Publish -> search -> apply -> CV upload/download (`%PDF-`) -> applicant detail -> status `SHORTLISTED` visible to the candidate -> silent refresh -> reload persistence -> signed-out redirects -> sign-out -> 500 px no overflow.
+  - 16 portal screenshots at 1440 + 500 px in `docs/screenshots/`; inspected after a header-height fix.
+  - `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178.
+  - `./tasks.ps1 e2e` -> `5/5 scenarios passed in 207.0s` (A 20.0, B 24.6, C 18.7, D 20.9, E 36.0); final assertion `8 non-draft jobs identical in both databases`.
+- Not done / left half-way: no commit made. `case`/`snake` nuance none. M7 (prod Dockerfiles, prod compose, Caddy, deploy scripts, full CI) not started.
+- Gotchas/decisions added: React Router splat ordering loop; full-reload sign-out; stretched single-column grid header (266 px -> 98 px); Playwright Edge channel hangs -> bundled chromium; e2e frontend port `:15174`; one transient Docker Desktop 500 during e2e (rerun green); CONTEXT mojibake repaired with `ftfy`.
+- Next session should start with: M7 — prod Dockerfiles for both Django services (repo-root context, non-root, healthcheck), `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`.

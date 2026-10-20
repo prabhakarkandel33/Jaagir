@@ -45,17 +45,32 @@ export type Candidate = {
   skills: string[];
   summary: string;
   resume_url: string;
+  resume_filename: string | null;
+  resume_uploaded_at: string | null;
+  has_resume: boolean;
   created_at: string;
   updated_at: string;
 };
 
 export type AuthSession<T> = {
   access: string;
+  refresh: string;
   tokenType: string;
   expiresIn: number;
+  refreshExpiresIn: number;
   recruiter?: T;
   candidate?: T;
 };
+
+export type TokenPair = {
+  access: string;
+  refresh: string;
+  tokenType: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+};
+
+export type SessionRole = 'recruiter' | 'candidate';
 
 export type Job = {
   id: string;
@@ -189,3 +204,80 @@ export type SearchParams = {
   page?: number;
   pageSize?: number;
 };
+
+export type StatusBreakdown = {
+  total: number;
+  byStatus: Record<string, number>;
+};
+
+export type RecruiterJobDashboard = {
+  jobs: StatusBreakdown;
+  recentJobs: Job[];
+};
+
+export type CandidateDashboard = {
+  applications: StatusBreakdown;
+  recent: Application[];
+};
+
+export type ApplicantProfile = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  headline: string;
+  location: string;
+  skills: string[];
+  summary: string;
+  resume_filename: string | null;
+  has_resume: boolean;
+  resume_url: string;
+};
+
+export type JobSnapshotLite = {
+  id: string;
+  title: string;
+  description: string;
+  company: string;
+  location: string;
+  employment_type: EmploymentType;
+  skills: string[];
+  status: JobStatus;
+  published_at: string | null;
+  closed_at: string | null;
+};
+
+export type RecruiterApplication = {
+  id: string;
+  status: ApplicationStatus;
+  cover_letter: string;
+  applied_at: string;
+  status_updated_at: string;
+  job_title_snapshot: string;
+  company_snapshot: string;
+  candidate: ApplicantProfile;
+  job: JobSnapshotLite;
+  resume_url: string;
+};
+
+export type JobApplicationCount = {
+  jobId: string;
+  total: number;
+  byStatus: Record<string, number>;
+};
+
+export type CandidateApplicationDetail = Application & {
+  job: JobSnapshotLite;
+};
+
+export type RecruiterDashboard = {
+  applications: StatusBreakdown & { newCount: number };
+  recent: RecruiterApplication[];
+};
+
+export const APPLICATION_STATUSES: ApplicationStatus[] = [
+  'IN_REVIEW',
+  'SHORTLISTED',
+  'REJECTED',
+  'ACCEPTED',
+];

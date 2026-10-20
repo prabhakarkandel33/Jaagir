@@ -110,12 +110,18 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/",
+    "ENUM_NAME_OVERRIDES": {
+        "JobStatusEnum": "apps.jobs.models.JobStatus",
+        "EmploymentTypeEnum": "apps.jobs.models.EmploymentType",
+    },
 }
 
 SIMPLE_JWT = {
     "ALGORITHM": env.jwt_algorithm,
     "ISSUER": env.jwt_issuer,
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
+    # M7A: sessions survive reloads; the refresh token lasts one week.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     # ARCHITECTURE.md section 9: the subject claim is ``sub``.
     "USER_ID_CLAIM": "sub",
     # base64-of-PEM env values are decoded here (newlines survive).

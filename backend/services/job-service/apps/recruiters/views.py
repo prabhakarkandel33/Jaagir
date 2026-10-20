@@ -19,17 +19,21 @@ from apps.recruiters.serializers import (
     LoginSerializer,
     RecruiterSerializer,
     RecruiterUpdateSerializer,
+    RefreshSerializer,
     RegisterSerializer,
 )
 from config.exceptions import ApiError
 
 
 def _auth_response(recruiter: Any, http_status: int) -> Response:
+    refresh = services.issue_refresh_token(recruiter)
     return Response(
         {
-            "access": services.issue_access_token(recruiter),
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
             "tokenType": "Bearer",
             "expiresIn": 3600,
+            "refreshExpiresIn": 604800,
             "recruiter": RecruiterSerializer(recruiter).data,
         },
         status=http_status,
@@ -83,6 +87,24 @@ class RecruiterLoginView(APIView):
                 http_status=status.HTTP_401_UNAUTHORIZED,
             )
         return _auth_response(recruiter, status.HTTP_200_OK)
+
+
+class RecruiterRefreshView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthRateThrottle]
+
+    @extend_schema(
+        request=RefreshSerializer,
+        responses={
+            200: OpenApiResponse(description="New access and refresh tokens."),
+            401: OpenApiResponse(description="INVALID_REFRESH_TOKEN"),
+        },
+        description="Exchange a recruiter refresh token for a new access token.",
+    )
+    def post(self, request: Request) -> Response:
+        serializer = RefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(services.refresh_tokens(serializer.validated_data["refresh"]))
 
 
 class RecruiterMeView(APIView):

@@ -38,6 +38,7 @@ class ReconcileAdminView(APIView):
     permission_classes: list[type] = []
 
     @extend_schema(
+        request=None,
         parameters=[ReconcileParamsSerializer],
         responses={200: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT, 502: OpenApiTypes.OBJECT},
         description=(
@@ -101,6 +102,7 @@ class DlqReplayView(APIView):
     permission_classes: list[type] = []
 
     @extend_schema(
+        request=None,
         parameters=[DlqReplayParamsSerializer],
         responses={200: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
         description=(

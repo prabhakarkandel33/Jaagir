@@ -16,8 +16,18 @@ urlpatterns = [
         name="candidate-login",
     ),
     path(
+        "auth/candidates/refresh",
+        views.CandidateRefreshView.as_view(),
+        name="candidate-refresh",
+    ),
+    path(
         "candidates/me",
         views.CandidateMeView.as_view(),
         name="candidate-me",
+    ),
+    path(
+        "candidates/me/resume",
+        views.CandidateResumeView.as_view(),
+        name="candidate-resume",
     ),
 ]

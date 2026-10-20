@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { api } from '../lib/api';
 
-export function Landing({ go }: { go: (path: string) => void }) {
+export function Landing() {
+  const navigate = useNavigate();
   const [openRoles, setOpenRoles] = useState<number | null>(null);
 
   useEffect(() => {
@@ -42,10 +44,10 @@ export function Landing({ go }: { go: (path: string) => void }) {
           </p>
 
           <div className="hero__actions">
-            <button type="button" className="cta cta--primary" onClick={() => go('/jobs')}>
+            <button type="button" className="cta cta--primary" onClick={() => navigate('/jobs')}>
               Find a job
             </button>
-            <button type="button" className="cta cta--ghost" onClick={() => go('/employers')}>
+            <button type="button" className="cta cta--ghost" onClick={() => navigate('/employers')}>
               Post a job
             </button>
           </div>
@@ -100,7 +102,7 @@ export function Landing({ go }: { go: (path: string) => void }) {
             Browse roles that match your skills, apply with your profile, and follow every
             application from one place.
           </p>
-          <button type="button" className="role__link" onClick={() => go('/jobs')}>
+          <button type="button" className="role__link" onClick={() => navigate('/jobs')}>
             Browse jobs
             <span aria-hidden="true">→</span>
           </button>
@@ -115,7 +117,7 @@ export function Landing({ go }: { go: (path: string) => void }) {
             Write a role once, publish it with one click, and read every applicant in a single
             list.
           </p>
-          <button type="button" className="role__link" onClick={() => go('/employers')}>
+          <button type="button" className="role__link" onClick={() => navigate('/employers')}>
             Post a job
             <span aria-hidden="true">→</span>
           </button>

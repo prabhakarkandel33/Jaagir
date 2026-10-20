@@ -20,6 +20,7 @@ from apps.jobs.serializers import (
     JobSearchResultSerializer,
     JobSerializer,
     JobWriteSerializer,
+    RecruiterJobDashboardSerializer,
 )
 from config.exceptions import ApiError
 
@@ -30,6 +31,7 @@ class PublicJobSearchView(APIView):
     permission_classes = [AllowAny]
 
     @extend_schema(
+        operation_id="jobs_search",
         parameters=[JobSearchParamsSerializer],
         responses={200: OpenApiResponse(description="{items, page, pageSize, total}")},
         description=(
@@ -58,6 +60,18 @@ class PublicJobSearchView(APIView):
                 "total": total,
             }
         )
+
+
+class RecruiterDashboardView(APIView):
+    permission_classes = [IsRecruiter]
+
+    @extend_schema(
+        responses={200: RecruiterJobDashboardSerializer},
+        description="Job totals by status plus the five newest roles.",
+    )
+    def get(self, request: Request) -> Response:
+        data = services.recruiter_dashboard(request.user)
+        return Response(RecruiterJobDashboardSerializer(data).data)
 
 
 class RecruiterJobListCreateView(APIView):
@@ -148,6 +162,7 @@ class PublicJobDetailView(APIView):
     permission_classes = [AllowAny]
 
     @extend_schema(
+        operation_id="jobs_detail",
         responses={200: JobSerializer, 404: OpenApiResponse(description="No published job.")},
         description="Public view of a PUBLISHED job. Drafts and closed jobs are 404.",
     )

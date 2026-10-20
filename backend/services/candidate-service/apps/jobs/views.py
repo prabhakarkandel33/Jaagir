@@ -25,6 +25,7 @@ class JobSearchView(APIView):
     permission_classes = [AllowAny]
 
     @extend_schema(
+        operation_id="jobs_search",
         parameters=[JobSearchParamsSerializer],
         responses={200: OpenApiResponse(description="{items, page, pageSize, total}")},
         description=(
@@ -61,6 +62,7 @@ class JobDetailView(APIView):
     permission_classes = [AllowAny]
 
     @extend_schema(
+        operation_id="jobs_detail",
         responses={200: JobSerializer, 404: OpenApiResponse(description="Not found.")},
         description="One published job from the local replica.",
     )

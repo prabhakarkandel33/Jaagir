@@ -47,6 +47,10 @@ class LoginSerializer(serializers.Serializer[Any]):
         return value.strip().lower()
 
 
+class RefreshSerializer(serializers.Serializer[Any]):
+    refresh = serializers.CharField()
+
+
 class RecruiterUpdateSerializer(serializers.ModelSerializer[Recruiter]):
     """Editable profile fields for PUT /recruiters/me. Email is immutable."""
 

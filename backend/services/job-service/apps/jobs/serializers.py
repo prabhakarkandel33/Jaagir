@@ -76,6 +76,16 @@ class JobSearchParamsSerializer(serializers.Serializer[Any]):
     pageSize = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
 
 
+class JobStatusBreakdownSerializer(serializers.Serializer[Any]):
+    total = serializers.IntegerField(read_only=True)
+    byStatus = serializers.DictField(child=serializers.IntegerField(), read_only=True)
+
+
+class RecruiterJobDashboardSerializer(serializers.Serializer[Any]):
+    jobs = JobStatusBreakdownSerializer(read_only=True)
+    recentJobs = JobSerializer(many=True, read_only=True)
+
+
 class JobSearchResultSerializer(serializers.Serializer[Any]):
     """One search hit. Deliberately narrower than JobSerializer."""
 

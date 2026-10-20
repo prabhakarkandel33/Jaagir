@@ -16,6 +16,11 @@ urlpatterns = [
         name="recruiter-login",
     ),
     path(
+        "auth/recruiters/refresh",
+        views.RecruiterRefreshView.as_view(),
+        name="recruiter-refresh",
+    ),
+    path(
         "recruiters/me",
         views.RecruiterMeView.as_view(),
         name="recruiter-me",

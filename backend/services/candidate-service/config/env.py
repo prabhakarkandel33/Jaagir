@@ -50,6 +50,10 @@ class ServiceSettings(BaseSettings):
     cors_allowed_origins: str = ""
     body_max_bytes: int = 1_048_576
 
+    # Resume media (M7A). Empty MEDIA_ROOT means <service>/media.
+    media_root: str = ""
+    resume_max_bytes: int = 5_242_880
+
     # Kafka: consumer settings. Kafka is optional for availability (I9).
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_consumer_group_id: str = "candidate-service"

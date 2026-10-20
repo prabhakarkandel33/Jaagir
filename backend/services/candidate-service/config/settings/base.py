@@ -71,6 +71,12 @@ AUTH_USER_MODEL = "candidates.Candidate"
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.body_max_bytes
 
+# Uploaded resumes (M7A). Never served through MEDIA_URL; the resume endpoints
+# stream the file only after an ownership check.
+MEDIA_ROOT = env.media_root or BASE_DIR / "media"
+MEDIA_URL = "/media/"
+RESUME_MAX_BYTES = env.resume_max_bytes
+
 CORS_ALLOWED_ORIGINS = env.cors_allowed_origins_list
 CORS_ALLOW_CREDENTIALS = False
 
@@ -105,12 +111,19 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/",
+    "ENUM_NAME_OVERRIDES": {
+        "JobStatusEnum": "apps.jobs.models.JobStatus",
+        "EmploymentTypeEnum": "apps.jobs.models.EmploymentType",
+        "ApplicationStatusEnum": "apps.applications.models.ApplicationStatus",
+    },
 }
 
 SIMPLE_JWT = {
     "ALGORITHM": env.jwt_algorithm,
     "ISSUER": env.jwt_issuer,
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
+    # M7A: sessions survive reloads; the refresh token lasts one week.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     # ARCHITECTURE.md section 9: the subject claim is ``sub``.
     "USER_ID_CLAIM": "sub",
     # This service signs candidate tokens (base64-of-PEM env values decoded

@@ -1,10 +1,14 @@
 import type {
   Application,
+  ApplicationStatus,
   AuthSession,
   Candidate,
+  CandidateApplicationDetail,
+  CandidateDashboard,
   DlqReplayResult,
   Health,
   Job,
+  JobApplicationCount,
   JobHit,
   JobSnapshot,
   JobWrite,
@@ -13,9 +17,13 @@ import type {
   Readyz,
   ReconcileResult,
   Recruiter,
+  RecruiterApplication,
+  RecruiterDashboard,
+  RecruiterJobDashboard,
   SearchParams,
   SnapshotPage,
   SyncStatus,
+  TokenPair,
 } from './types';
 
 const JOB_BASE = (import.meta.env.VITE_JOB_SERVICE_URL ?? 'http://localhost:3001').replace(
@@ -76,10 +84,21 @@ type QueryValue = string | number | boolean | string[] | undefined | null;
 type RequestOptions = {
   method?: string;
   body?: unknown;
+  form?: FormData;
   token?: string;
   internalToken?: string;
   query?: Record<string, QueryValue>;
+  retried?: boolean;
 };
+
+let tokenRefresher: ((service: ServiceName) => Promise<string | null>) | null = null;
+
+/** The session provider owns refresh tokens; it registers the single-flight refresher here. */
+export function setTokenRefresher(
+  refresher: ((service: ServiceName) => Promise<string | null>) | null,
+): void {
+  tokenRefresher = refresher;
+}
 
 function buildUrl(base: string, path: string, query?: Record<string, QueryValue>): string {
   const url = `${base}${path}`;
@@ -130,10 +149,10 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { method = 'GET', body, token, internalToken, query } = options;
+  const { method = 'GET', body, form, token, internalToken, query, retried } = options;
   const url = buildUrl(BASES[service], path, query);
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   if (internalToken) headers['X-Internal-Token'] = internalToken;
 
@@ -143,7 +162,7 @@ async function request<T>(
     response = await fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (cause) {
     const ms = Math.round(performance.now() - started);
@@ -159,6 +178,13 @@ async function request<T>(
   const ms = Math.round(performance.now() - started);
   emitWire({ id: wireId++, at: new Date().toISOString(), method, url, status: response.status, ms, ok: response.ok });
 
+  if (response.status === 401 && token && !retried && tokenRefresher) {
+    const fresh = await tokenRefresher(service);
+    if (fresh) {
+      return request<T>(service, path, { ...options, token: fresh, retried: true });
+    }
+  }
+
   if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
   const text = await response.text();
@@ -167,10 +193,33 @@ async function request<T>(
 }
 
 
+export async function downloadFile(
+  service: ServiceName,
+  path: string,
+  token: string,
+  retried = false,
+): Promise<Blob> {
+  const response = await fetch(`${BASES[service]}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401 && !retried && tokenRefresher) {
+    const fresh = await tokenRefresher(service);
+    if (fresh) return downloadFile(service, path, fresh, true);
+  }
+  if (!response.ok) throw await parseError(response);
+  return response.blob();
+}
+
 export const api = {
   job: {
     health: () => request<Health>('job', '/healthz'),
     ready: () => request<Readyz>('job', '/readyz'),
+
+    dashboard: (token: string) =>
+      request<RecruiterJobDashboard>('job', '/recruiter/dashboard', { token }),
+
+    refresh: (refresh: string) =>
+      request<TokenPair>('job', '/auth/recruiters/refresh', { method: 'POST', body: { refresh } }),
 
     registerRecruiter: (payload: {
       email: string;
@@ -247,6 +296,30 @@ export const api = {
         body: payload,
       }),
 
+    refresh: (refresh: string) =>
+      request<TokenPair>('candidate', '/auth/candidates/refresh', {
+        method: 'POST',
+        body: { refresh },
+      }),
+
+    dashboard: (token: string) =>
+      request<CandidateDashboard>('candidate', '/candidates/me/dashboard', { token }),
+
+    uploadResume: (token: string, file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return request<Candidate>('candidate', '/candidates/me/resume', {
+        method: 'POST',
+        token,
+        form,
+      });
+    },
+
+    removeResume: (token: string) =>
+      request<Candidate>('candidate', '/candidates/me/resume', { method: 'DELETE', token }),
+
+    resumeBlob: (token: string) => downloadFile('candidate', '/candidates/me/resume', token),
+
     me: (token: string) => request<Candidate>('candidate', '/candidates/me', { token }),
 
     updateMe: (
@@ -282,13 +355,40 @@ export const api = {
       }),
 
     myApplication: (token: string, id: string) =>
-      request<Application>('candidate', `/candidates/me/applications/${id}`, { token }),
+      request<CandidateApplicationDetail>('candidate', `/candidates/me/applications/${id}`, {
+        token,
+      }),
 
     jobApplications: (token: string, jobId: string, page = 1, pageSize = 20) =>
-      request<Page<Application>>('candidate', `/recruiter/jobs/${jobId}/applications`, {
+      request<Page<RecruiterApplication>>('candidate', `/recruiter/jobs/${jobId}/applications`, {
         token,
         query: { page, pageSize },
       }),
+
+    allApplications: (token: string, page = 1, pageSize = 20) =>
+      request<Page<RecruiterApplication>>('candidate', '/recruiter/applications', {
+        token,
+        query: { page, pageSize },
+      }),
+
+    application: (token: string, id: string) =>
+      request<RecruiterApplication>('candidate', `/recruiter/applications/${id}`, { token }),
+
+    setApplicationStatus: (token: string, id: string, status: ApplicationStatus) =>
+      request<RecruiterApplication>('candidate', `/recruiter/applications/${id}/status`, {
+        method: 'PATCH',
+        token,
+        body: { status },
+      }),
+
+    applicationCounts: (token: string) =>
+      request<JobApplicationCount[]>('candidate', '/recruiter/application-counts', { token }),
+
+    recruiterDashboard: (token: string) =>
+      request<RecruiterDashboard>('candidate', '/recruiter/dashboard', { token }),
+
+    applicationResumeBlob: (token: string, id: string) =>
+      downloadFile('candidate', `/recruiter/applications/${id}/resume`, token),
 
     reconcile: (internalToken: string, mode: 'full' | 'incremental') =>
       request<ReconcileResult>('candidate', '/internal/admin/reconcile', {

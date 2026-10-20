@@ -18,26 +18,6 @@ Design: `ARCHITECTURE.md`. Work queue and status: `CONTEXT.md`. Agent rules: `AG
 
 M1-M6 complete, M7 in progress (frontend image + admin console done). See `CONTEXT.md` > Status board.
 
-## Screenshots
-
-Public site: warm, plain language, built for job seekers and employers.
-
-| Landing | Find jobs |
-|---|---|
-| ![Landing page](docs/screenshots/landing.png) | ![Job search](docs/screenshots/jobs.png) |
-
-| Live search | Job seeker sign in |
-|---|---|
-| ![Search for python](docs/screenshots/search-python.png) | ![Job seeker sign in](docs/screenshots/job-seeker.png) |
-
-| Employer sign in |
-|---|
-| ![Employer sign in](docs/screenshots/employers.png) |
-
-Ops console: dark, technical, for operators.
-
-![Admin sign-in](docs/screenshots/admin.png)
-
 ## Local setup (one command, all containers)
 
 Prerequisite: Docker with Compose v2.20+ (needed for `include:`) and both service env files.
@@ -57,3 +37,26 @@ Logs: `docker compose logs -f [service]`. Stop: `docker compose down` (add `-v` 
 
 `tasks.ps1 stack-up` / `make stack-up` is the same compose project with a build step.
 
+## Screenshots
+
+![Job portal](docs/screenshots/landing.png)
+
+![Job search](docs/screenshots/jobs.png)
+
+![Live search](docs/screenshots/search-python.png)
+
+![Job seeker sign in](docs/screenshots/job-seeker.png)
+
+![Employer sign in](docs/screenshots/employers.png)
+
+![Ops console](docs/screenshots/admin.png)
+
+### Signed-in portals
+
+![Recruiter dashboard](docs/screenshots/portal-recruiter-dashboard-1440.png)
+
+![Recruiter applicant detail](docs/screenshots/portal-recruiter-applicant-1440.png)
+
+![Candidate dashboard](docs/screenshots/portal-candidate-dashboard-1440.png)
+
+![Candidate profile with CV](docs/screenshots/portal-candidate-profile-1440.png)

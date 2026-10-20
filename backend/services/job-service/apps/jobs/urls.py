@@ -15,6 +15,11 @@ urlpatterns = [
         internal_views.InternalJobDetailView.as_view(),
         name="internal-job-detail",
     ),
+    path(
+        "recruiter/dashboard",
+        views.RecruiterDashboardView.as_view(),
+        name="recruiter-dashboard",
+    ),
     path("recruiter/jobs", views.RecruiterJobListCreateView.as_view(), name="recruiter-jobs"),
     path(
         "recruiter/jobs/<uuid:job_id>",

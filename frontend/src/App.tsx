@@ -1,192 +1,130 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
-import { api } from './lib/api';
+import { PortalShell } from './layouts/PortalShell';
+import { PublicShell } from './layouts/PublicShell';
+import { RequireRole, SessionProvider, SignedOutOnly } from './lib/session';
 import { Admin, type AdminTokens } from './views/Admin';
-import { Candidate, type CandidateSession } from './views/Candidate';
-import { Discover } from './views/Discover';
 import { Landing } from './views/Landing';
-import { Recruiter, type RecruiterSession } from './views/Recruiter';
+import { ApplicantDetail } from './views/portal/ApplicantDetail';
+import { CandidateApplicationDetail } from './views/portal/CandidateApplicationDetail';
+import { CandidateApplications } from './views/portal/CandidateApplications';
+import { CandidateDashboard } from './views/portal/CandidateDashboard';
+import { CandidateProfile } from './views/portal/CandidateProfile';
+import { PostRole } from './views/portal/PostRole';
+import { RecruiterApplicants } from './views/portal/RecruiterApplicants';
+import { RecruiterDashboard } from './views/portal/RecruiterDashboard';
+import { RecruiterProfile } from './views/portal/RecruiterProfile';
+import { RecruiterRoles } from './views/portal/RecruiterRoles';
+import { RoleDetail } from './views/portal/RoleDetail';
+import { RoleEdit } from './views/portal/RoleEdit';
+import { CandidateSignIn } from './views/public/CandidateSignIn';
+import { JobDetail } from './views/public/JobDetail';
+import { Jobs } from './views/public/Jobs';
+import { RecruiterSignIn } from './views/public/RecruiterSignIn';
 
-const PUBLIC_PATHS = ['/', '/jobs', '/employers', '/me'];
-
-function readStored<T>(key: string, fallback: T): T {
+function readAdmin(): AdminTokens | null {
   try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    const raw = window.localStorage.getItem('jp.admin');
+    return raw ? (JSON.parse(raw) as AdminTokens) : null;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
-function store(key: string, value: unknown): void {
-  try {
-    if (value === null || value === undefined || value === '') {
-      window.localStorage.removeItem(key);
-    } else {
-      window.localStorage.setItem(key, JSON.stringify(value));
+function AdminRoute() {
+  const [tokens, setTokens] = useState<AdminTokens | null>(readAdmin);
+
+  useEffect(() => {
+    document.body.dataset.world = 'admin';
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (tokens) window.localStorage.setItem('jp.admin', JSON.stringify(tokens));
+      else window.localStorage.removeItem('jp.admin');
+    } catch {
+      // A full or blocked storage must not break the console.
     }
-  } catch {
-    // A full or blocked storage must not break the page.
-  }
-}
+  }, [tokens]);
 
-function currentPath(): string {
-  const path = window.location.pathname.replace(/\/+$/, '');
-  return path === '' ? '/' : path;
+  return <Admin tokens={tokens} onTokens={setTokens} />;
 }
 
 export default function App() {
-  const [path, setPath] = useState<string>(currentPath);
-
-  const [recruiterSession, setRecruiterSession] = useState<RecruiterSession | null>(() =>
-    readStored<RecruiterSession | null>('jp.recruiter', null),
-  );
-  const [candidateSession, setCandidateSession] = useState<CandidateSession | null>(() =>
-    readStored<CandidateSession | null>('jp.candidate', null),
-  );
-  const [adminTokens, setAdminTokens] = useState<AdminTokens | null>(() =>
-    readStored<AdminTokens | null>('jp.admin', null),
-  );
-  const [openRoles, setOpenRoles] = useState<number | null>(null);
-
-  const go = useCallback((next: string) => {
-    if (currentPath() !== next) {
-      window.history.pushState({}, '', next);
-    }
-    setPath(next);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => {
-    const sync = () => setPath(currentPath());
-    window.addEventListener('popstate', sync);
-    return () => window.removeEventListener('popstate', sync);
-  }, []);
-
-  useEffect(() => store('jp.recruiter', recruiterSession), [recruiterSession]);
-  useEffect(() => store('jp.candidate', candidateSession), [candidateSession]);
-  useEffect(() => store('jp.admin', adminTokens), [adminTokens]);
-
-  useEffect(() => {
-    document.body.dataset.world = path === '/admin' ? 'admin' : 'public';
-  }, [path]);
-
-  useEffect(() => {
-    api.candidate
-      .searchJobs({ page: 1, pageSize: 1 })
-      .then((page) => setOpenRoles(page.total))
-      .catch(() => setOpenRoles(null));
-  }, [path]);
-
-  if (path === '/admin') {
-    return <Admin tokens={adminTokens} onTokens={setAdminTokens} />;
-  }
-
-  const route = PUBLIC_PATHS.includes(path) ? path : '/';
-
   return (
-    <div className="site">
-      <header className="sitehead">
-        <a
-          className="wordmark"
-          href="/"
-          onClick={(event) => {
-            event.preventDefault();
-            go('/');
-          }}
-        >
-          <span className="wordmark__deva" lang="hi">
-            जागीर
-          </span>
-          <span className="wordmark__latin">job portal</span>
-        </a>
+    <BrowserRouter>
+      <SessionProvider>
+        <Routes>
+          <Route element={<PublicShell />}>
+            <Route
+              index
+              element={
+                <SignedOutOnly>
+                  <Landing />
+                </SignedOutOnly>
+              }
+            />
+            <Route path="jobs" element={<Jobs />} />
+            <Route path="jobs/:id" element={<JobDetail />} />
+            <Route
+              path="employers"
+              element={
+                <SignedOutOnly>
+                  <RecruiterSignIn />
+                </SignedOutOnly>
+              }
+            />
+            <Route
+              path="me"
+              element={
+                <SignedOutOnly>
+                  <CandidateSignIn />
+                </SignedOutOnly>
+              }
+            />
+          </Route>
 
-        <nav className="sitenav" aria-label="Main">
-          <a
-            href="/jobs"
-            aria-current={route === '/jobs' ? 'page' : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              go('/jobs');
-            }}
+          <Route
+            element={
+              <RequireRole role="recruiter">
+                <PortalShell />
+              </RequireRole>
+            }
           >
-            Find jobs
-          </a>
-          <a
-            href="/employers"
-            aria-current={route === '/employers' ? 'page' : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              go('/employers');
-            }}
+            <Route path="employers/dashboard" element={<RecruiterDashboard />} />
+            <Route path="employers/profile" element={<RecruiterProfile />} />
+            <Route path="employers/post" element={<PostRole />} />
+            <Route path="employers/roles" element={<RecruiterRoles />} />
+            <Route path="employers/roles/:id" element={<RoleDetail />} />
+            <Route path="employers/roles/:id/edit" element={<RoleEdit />} />
+            <Route path="employers/applicants" element={<RecruiterApplicants />} />
+            <Route
+              path="employers/applicants/:applicationId"
+              element={<ApplicantDetail />}
+            />
+          </Route>
+
+          <Route
+            element={
+              <RequireRole role="candidate">
+                <PortalShell />
+              </RequireRole>
+            }
           >
-            For employers
-          </a>
-        </nav>
+            <Route path="me/dashboard" element={<CandidateDashboard />} />
+            <Route path="me/profile" element={<CandidateProfile />} />
+            <Route path="me/applications" element={<CandidateApplications />} />
+            <Route
+              path="me/applications/:applicationId"
+              element={<CandidateApplicationDetail />}
+            />
+          </Route>
 
-        <div className="sitehead__account">
-          {candidateSession ? (
-            <a
-              className="pill"
-              href="/me"
-              onClick={(event) => {
-                event.preventDefault();
-                go('/me');
-              }}
-            >
-              Hi, {candidateSession.profile.full_name.split(' ')[0]}
-            </a>
-          ) : (
-            <a
-              className="cta cta--small cta--primary"
-              href="/me"
-              onClick={(event) => {
-                event.preventDefault();
-                go('/me');
-              }}
-            >
-              Sign in
-            </a>
-          )}
-        </div>
-      </header>
-
-      <main className="sitemain">
-        {route === '/' ? <Landing go={go} /> : null}
-
-        {route === '/jobs' ? (
-          <Discover
-            candidateToken={candidateSession?.token ?? null}
-            candidateName={candidateSession?.profile.full_name ?? null}
-            onOpenAccount={() => go('/me')}
-          />
-        ) : null}
-
-        {route === '/employers' ? (
-          <Recruiter session={recruiterSession} onSession={setRecruiterSession} />
-        ) : null}
-
-        {route === '/me' ? (
-          <Candidate
-            session={candidateSession}
-            onSession={setCandidateSession}
-            onExplore={() => go('/jobs')}
-            onEmployer={() => go('/employers')}
-          />
-        ) : null}
-      </main>
-
-      <footer className="sitefoot">
-        <p className="sitefoot__brand">
-          <span lang="hi">जागीर</span> · good work, good people
-        </p>
-        <p className="sitefoot__meta">
-          {openRoles === null ? 'Roles updated every day' : `${openRoles.toLocaleString()} open roles`}
-        </p>
-        <a className="sitefoot__ops" href="/admin">
-          Ops console
-        </a>
-      </footer>
-    </div>
+          <Route path="admin" element={<AdminRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </SessionProvider>
+    </BrowserRouter>
   );
 }

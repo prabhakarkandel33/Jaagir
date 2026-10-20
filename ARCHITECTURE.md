@@ -121,7 +121,9 @@ Outbox rows are written only for: first publish, update while `PUBLISHED`, close
 
 ```
 candidates(id uuid pk, email, password_hash, full_name, phone, headline, location,
-           skills text[], summary, resume_url, created_at, updated_at)   -- UNIQUE lower(email)
+           skills text[], summary, resume_url,
+           resume_file text null, resume_filename text null, resume_uploaded_at timestamptz null,
+           created_at, updated_at)   -- UNIQUE lower(email); file lives on the candidate media volume
 
 jobs(id uuid pk /* = source job id */, recruiter_id, title, description, company, location,
      employment_type, skills text[], status, version int, published_at, closed_at,
@@ -253,18 +255,20 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 ## 8. API surface (summary; full OpenAPI generated at `/docs`)
 
 **Job Service (`jobs.<domain>`)**
-- `POST /auth/recruiters/register` · `POST /auth/recruiters/login` · `GET|PUT /recruiters/me`
+- `POST /auth/recruiters/register` · `POST /auth/recruiters/login` · `POST /auth/recruiters/refresh` · `GET|PUT /recruiters/me`
+- `GET /recruiter/dashboard` (job counts by status + recent jobs)
 - `POST /recruiter/jobs` (creates DRAFT) · `GET /recruiter/jobs` · `GET|PUT /recruiter/jobs/:id` · `POST /recruiter/jobs/:id/publish` · `POST /recruiter/jobs/:id/close`
 - Public: `GET /jobs` (search/browse, PUBLISHED only) · `GET /jobs/:id` (PUBLISHED only)
 - Internal: `GET /internal/jobs/snapshot` · `GET /internal/jobs/:id` · `GET /internal/admin/outbox`
 - `GET /healthz` (liveness) · `GET /readyz` (DB required; Kafka reported, never fails readiness)
 
 **Candidate & Application Service (`candidates.<domain>`)**
-- `POST /auth/candidates/register` · `POST /auth/candidates/login` · `GET|PUT /candidates/me`
+- `POST /auth/candidates/register` · `POST /auth/candidates/login` · `POST /auth/candidates/refresh` · `GET|PUT /candidates/me`
+- `GET /candidates/me/dashboard` · `GET /candidates/me/resume` · `POST|DELETE /candidates/me/resume` (PDF, <= 5 MiB)
 - `GET /jobs` (search replica) · `GET /jobs/:id`
 - `POST /jobs/:id/applications` (apply; 409 `APPLICATION_ALREADY_EXISTS`, 409 `JOB_NOT_OPEN`, 404 `JOB_NOT_FOUND`)
 - `GET /candidates/me/applications` · `GET /candidates/me/applications/:id`
-- Recruiter (Job-Service-issued JWT): `GET /recruiter/jobs/:jobId/applications` · `(P1) PATCH /recruiter/applications/:id/status`
+- Recruiter (Job-Service-issued JWT): `GET /recruiter/dashboard` · `GET /recruiter/application-counts` · `GET /recruiter/jobs/:jobId/applications` · `GET /recruiter/applications/:id` · `PATCH /recruiter/applications/:id/status` · `GET /recruiter/applications/:id/resume`
 - Internal: `POST /internal/admin/reconcile` · `GET /internal/admin/sync-status` · `POST /internal/admin/dlq/replay`
 - `GET /healthz` · `GET /readyz`
 
@@ -272,7 +276,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 ## 9. Auth & security
 
-- Passwords: argon2id (`argon2-cffi`, Django's default hasher). Access tokens: JWT (ES256/RS256) via `djangorestframework-simplejwt`, 1 h, claims `sub`, `role` (`recruiter`|`candidate`), `iss`. Each service signs its own users' tokens and holds the **peer's public key** (env, base64-encoded PEM) to accept recruiter tokens in the Candidate Service. Role is checked on every route.
+- Passwords: argon2id (`argon2-cffi`, Django's default hasher). Access tokens: JWT (ES256/RS256) via `djangorestframework-simplejwt`, 1 h, claims `sub`, `role` (`recruiter`|`candidate`), `iss`; refresh tokens last 7 days and are exchanged at `POST /auth/{recruiters,candidates}/refresh` (M7A). Each service signs its own users' tokens and holds the **peer's public key** (env, base64-encoded PEM) to accept recruiter tokens in the Candidate Service. Role is checked on every route.
 - Ownership checks: recruiters touch only their jobs; candidates only their applications.
 - Internal calls: `X-Internal-Token` (random 32+ bytes, env), constant-time compare. Caddy returns 404 for `/internal/*` from outside; services talk over the private docker network.
 - Hardening: Django security middleware + CORS allowlist, DRF throttling on auth routes, serializers on all inputs, ORM/parameterized SQL only, body size limit, log redaction, generic auth errors (no user enumeration), non-root containers, DB roles per service, Postgres and Kafka not published to the host network.
@@ -282,7 +286,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 ## 10. Deployment & CI/CD
 
-**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `job-service` · `candidate-service` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container.
+**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `job-service` · `candidate-service` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container. The Candidate Service writes uploaded CVs to a named `candidate-media` volume mounted at `MEDIA_ROOT`; the nightly backup includes that volume (M7A).
 
 **ci.yml (PR + push):** `uv sync` -> lint + typecheck -> unit + integration tests (compose infra) -> **migration check** (for each service: fresh Postgres, `migrate`, then `migrate <app> <previous>`, then `migrate` again; fail if a committed migration file changed; verify both services migrate against *their own* DB only) -> build both Docker images (no push on PRs) -> e2e outage suite on `main`.
 
@@ -329,7 +333,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 4 GB works but is tight during deploys; 8 GB is the recommendation. CPU: 2 vCPU is enough steady-state; 4 gives room for the 100k seed + GIN build + concurrent deploy.
 
-**Storage justification:** OS+Docker ~10 GB, images ~3 GB (keep last 3 tags), Postgres data < 3 GB at assumed scale, Kafka < 1 GB (7-day retention), logs capped ~300 MB, backups ~5-10 GB, headroom for growth.
+**Storage justification:** OS+Docker ~10 GB, images ~3 GB (keep last 3 tags), Postgres data < 3 GB at assumed scale, Kafka < 1 GB (7-day retention), CV media on the candidate volume (capped at 5 MiB per file), logs capped ~300 MB, backups ~5-10 GB, headroom for growth.
 
 **Domains / DNS:** `jobs.<domain>` and `candidates.<domain>`, `A` records to the VPS IP (and `AAAA` if IPv6). DNS must resolve **before** first deploy so Caddy can obtain Let's Encrypt certificates.
 
@@ -362,7 +366,7 @@ Recommendation: single VPS, **separate containers and volumes per datastore**, f
 
 ## 13. Non-goals
 
-No email, file storage, payments, multi-region, Kafka HA, schema registry, or service mesh. Resume is a URL string only. A React frontend (Vite) is in scope; see AGENTS.md §2 and CONTEXT.md Decisions.
+No email, payments, multi-region, Kafka HA, schema registry, or service mesh. Resume is a URL string, plus an optional PDF upload (<= 5 MiB) stored on the Candidate Service media volume and served only through guarded endpoints (M7A, human-directed exception). A React frontend (Vite) is in scope; see AGENTS.md §2 and CONTEXT.md Decisions.
 
 ## 14. Requirement traceability (fill in "Evidence" during M9)
 

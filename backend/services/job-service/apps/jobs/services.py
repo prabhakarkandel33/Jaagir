@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db.models import QuerySet
+from django.db.models import Count, QuerySet
 from django.utils import timezone
 from rest_framework import status
 
@@ -51,6 +51,18 @@ def _locked_job(recruiter: Recruiter, job_id: Any) -> Job:
 
 def list_jobs_for_recruiter(recruiter: Recruiter) -> QuerySet[Job]:
     return Job.objects.filter(recruiter=recruiter).order_by("-created_at")
+
+
+def recruiter_dashboard(recruiter: Recruiter) -> dict[str, Any]:
+    """Job totals by status plus the five newest roles (single database, I1)."""
+    queryset = Job.objects.filter(recruiter=recruiter)
+    by_status = dict.fromkeys(JobStatus.values, 0)
+    for row in queryset.values("status").annotate(count=Count("id")):
+        by_status[row["status"]] = row["count"]
+    return {
+        "jobs": {"total": sum(by_status.values()), "byStatus": by_status},
+        "recentJobs": list(queryset.order_by("-created_at")[:5]),
+    }
 
 
 def get_owned_job(recruiter: Recruiter, job_id: Any) -> Job:

@@ -47,6 +47,38 @@ def test_register_creates_recruiter_and_returns_token() -> None:
     assert str(token["sub"]) == str(Recruiter.objects.get(email="ada@example.com").id)
 
 
+def test_refresh_returns_access_with_role_and_issuer() -> None:
+    client = APIClient()
+    assert client.post(REGISTER_URL, register_payload(), format="json").status_code == 201
+    login = client.post(
+        LOGIN_URL, {"email": "ada@example.com", "password": PASSWORD}, format="json"
+    )
+    assert login.status_code == 200
+    assert login.json()["refresh"]
+
+    response = APIClient().post(
+        "/auth/recruiters/refresh",
+        {"refresh": login.json()["refresh"]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    token = AccessToken(response.json()["access"])
+    assert token["role"] == "recruiter"
+    assert token["iss"] == "job-service"
+
+
+def test_refresh_rejects_an_invalid_token() -> None:
+    response = APIClient().post(
+        "/auth/recruiters/refresh",
+        {"refresh": "not-a-token"},
+        format="json",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_REFRESH_TOKEN"
+
+
 def test_register_normalizes_email_to_lowercase() -> None:
     response = APIClient().post(
         REGISTER_URL, register_payload(email="Ada@Example.COM"), format="json"
