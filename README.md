@@ -45,18 +45,24 @@ Logs: `docker compose logs -f [service]`. Stop: `docker compose down` (add `-v` 
 
 ![Live search](docs/screenshots/search-python.png)
 
-![Job seeker sign in](docs/screenshots/job-seeker.png)
+![Job detail](docs/screenshots/job-detail-1440.png)
 
-![Employer sign in](docs/screenshots/employers.png)
-
-![Ops console](docs/screenshots/admin.png)
-
-### Signed-in portals
+### Recruiter portal
 
 ![Recruiter dashboard](docs/screenshots/portal-recruiter-dashboard-1440.png)
 
-![Recruiter applicant detail](docs/screenshots/portal-recruiter-applicant-1440.png)
+![Applicants](docs/screenshots/portal-recruiter-applicants-1440.png)
 
-![Candidate dashboard](docs/screenshots/portal-candidate-dashboard-1440.png)
+![Applicant detail with CV and status](docs/screenshots/portal-recruiter-applicant-1440.png)
 
-![Candidate profile with CV](docs/screenshots/portal-candidate-profile-1440.png)
+### Job seeker portal
+
+![Candidate dashboard with CV reminder](docs/screenshots/cv-reminder-1440.png)
+
+![Candidate profile with CV upload](docs/screenshots/candidate-profile-cv-1440.png)
+
+![CV preview modal](docs/screenshots/cv-preview-modal-1440.png)
+
+### Operations
+
+![Ops console](docs/screenshots/admin.png)

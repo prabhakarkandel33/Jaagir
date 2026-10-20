@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { isApiError } from '../lib/api';
 import { errorText } from '../lib/format';
@@ -181,6 +182,57 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
         <span key={index} className={index === 0 ? 'skeleton__row skeleton__row--lead' : 'skeleton__row'} />
       ))}
     </div>
+  );
+}
+
+export function Modal({
+  title,
+  onClose,
+  children,
+  actions,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="modal" role="presentation" onClick={onClose}>
+      <div
+        className={`modal__card${wide ? ' modal__card--wide' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="modal__head">
+          <h2 className="modal__title">{title}</h2>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </header>
+        <div className="modal__body">{children}</div>
+        {actions ? <footer className="modal__foot">{actions}</footer> : null}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

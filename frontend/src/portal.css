@@ -565,33 +565,6 @@
   white-space: pre-wrap;
 }
 
-/* ------------------------------------------------------------------- meter */
-.meter {
-  height: 8px;
-  overflow: hidden;
-  background: rgba(23, 33, 31, 0.08);
-  border-radius: 999px;
-}
-
-.meter__fill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--job), var(--cand));
-  border-radius: 999px;
-  transition: width 300ms var(--ease-out);
-}
-
-.meter__label {
-  margin: 0;
-  font-size: 15px;
-  color: var(--dim);
-}
-
-.meter__label strong {
-  font-size: 19px;
-  color: var(--paper);
-}
-
 /* ---------------------------------------------------------------------- CV */
 .cvbox {
   display: flex;
@@ -632,18 +605,291 @@
   white-space: nowrap;
 }
 
-.cvupload {
+.cvbox__actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  gap: 8px;
+}
+
+.cvtag {
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: rgba(23, 33, 31, 0.06);
+  border-radius: 999px;
+}
+
+.cvhint {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+.cvdrop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  background: #faf3e6;
+  border: 1.5px dashed rgba(23, 33, 31, 0.2);
+  border-radius: 14px;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.cvdrop--active {
+  background: #fdf7ec;
+  border-color: var(--cand);
+}
+
+.cvdrop--ready {
+  border-style: solid;
+  border-color: rgba(23, 33, 31, 0.16);
+}
+
+.cvdrop__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--cand);
+  background: rgba(23, 33, 31, 0.05);
+  border-radius: 12px;
+}
+
+.cvdrop__icon svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cvdrop__text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 180px;
+}
+
+.cvdrop__text strong {
+  overflow: hidden;
+  font-size: 14.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cvdrop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.cvpick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--paper);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(23, 33, 31, 0.22);
+  border-radius: 9px;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.cvpick:hover {
+  background: rgba(23, 33, 31, 0.04);
+  border-color: rgba(23, 33, 31, 0.34);
+}
+
+.cvpick:focus-within {
+  outline: 2px solid var(--cand);
+  outline-offset: 2px;
+}
+
+.cvpick input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.cvframe {
+  display: block;
+  width: 100%;
+  height: min(70vh, 680px);
+  background: #fff;
+  border: 0;
+  border-radius: 10px;
+}
+
+/* --------------------------------------------------------------- CV reminder */
+.cvmemo {
+  display: grid;
   gap: 12px;
-  padding-top: 16px;
+  align-content: start;
+  padding: 22px;
+  background: linear-gradient(150deg, #fdf6e8 0%, #faf1e1 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.cvmemo__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 46px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fffdf8;
+  background: var(--danger);
+  border-radius: 6px;
+}
+
+.cvmemo__title {
+  margin: 0 0 4px;
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--paper);
+}
+
+.cvmemo__text p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+.cvmemo__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+/* -------------------------------------------------------------------- modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: 24px;
+  background: rgba(23, 33, 31, 0.45);
+  backdrop-filter: blur(3px);
+  animation: modalIn 160ms var(--ease-out) both;
+}
+
+.modal__card {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  background: #fbf6ec;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(23, 33, 31, 0.28);
+}
+
+.modal__card--wide {
+  width: min(900px, 100%);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal__title {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--paper);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal__close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--dim);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.modal__close:hover {
+  color: var(--paper);
+  background: rgba(23, 33, 31, 0.06);
+}
+
+.modal__close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.modal__body {
+  padding: 18px;
+  overflow: auto;
+}
+
+.modal__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px;
   border-top: 1px solid var(--line);
 }
 
-.cvupload .field {
-  flex: 1;
-  min-width: 220px;
+@keyframes modalIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ----------------------------------------------------------------- job page */
@@ -880,7 +1126,28 @@
     margin-right: 0;
   }
 
-  .cvupload {
-    align-items: stretch;
+  .cvbox__actions {
+    width: 100%;
+  }
+
+  .cvdrop {
+    align-items: flex-start;
+  }
+
+  .cvdrop__actions {
+    width: 100%;
+  }
+
+  .cvdrop__actions .btn,
+  .cvpick {
+    flex: 1;
+  }
+
+  .modal {
+    padding: 12px;
+  }
+
+  .cvframe {
+    height: min(72vh, 560px);
   }
 }

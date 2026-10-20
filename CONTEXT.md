@@ -358,6 +358,9 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-20, M7A] `make e2e` reuses `docker-compose.dev-full.yml`, which now includes the frontend on `${FRONTEND_PORT:-5174}`; that collides with the dev stack. `e2e/run_e2e.py` now sets `FRONTEND_PORT=15174` and points the Vite build args at `13001`/`13002`.
 - [2026-10-20, M7A] Docker Desktop returned `500 Internal Server Error` from `compose stop candidate-reconciler` during e2e scenario E, and two e2e containers disappeared. Cause: transient daemon fault with 21 containers across two projects. Fix: rerun; the full suite passed `5/5 in 207.0s`. Do not treat a single daemon 500 as a code failure.
 - [2026-10-20, M7A] `CONTEXT.md` had 756 characters of double-encoded mojibake (`Ãƒâ€šÃ‚Â§`) from earlier PowerShell round-trips. Fixed once with `ftfy.fix_text` (read as UTF-8, write as UTF-8, LF); check with the `read` tool, not `Get-Content` (ANSI default misleads).
+- [2026-10-20, M7A] A fixed-position modal rendered inside `.portal-main` was clipped to the content column (`x=398` instead of centred) and did not dim the sidebar, because the page entry animation sets a transform and becomes the containing block for `position: fixed`. Fix: render `Modal` through `createPortal(..., document.body)`.
+- [2026-10-20, M7A] Headless Chromium does not render PDFs inside an `<iframe>` (blank white area), although headed Chromium shows the built-in viewer normally. Use a headed browser for PDF-preview screenshots; do not treat the blank headless iframe as a UI bug.
+- [2026-10-20, M7A] UI screenshots taken before the page entry animation settles look washed out (opacity < 1). Wait 800-1200 ms after navigation or after a route change before `page.screenshot()`.
 
 ---
 
@@ -602,3 +605,13 @@ Template:
 - Not done / left half-way: no commit made. `case`/`snake` nuance none. M7 (prod Dockerfiles, prod compose, Caddy, deploy scripts, full CI) not started.
 - Gotchas/decisions added: React Router splat ordering loop; full-reload sign-out; stretched single-column grid header (266 px -> 98 px); Playwright Edge channel hangs -> bundled chromium; e2e frontend port `:15174`; one transient Docker Desktop 500 during e2e (rerun green); CONTEXT mojibake repaired with `ftfy`.
 - Next session should start with: M7 — prod Dockerfiles for both Django services (repo-root context, non-root, healthcheck), `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`.
+### Session 15: 2026-10-20: M7A CV upload polish (follow-up)
+- Did: removed the "profile strength" percentage card from the candidate dashboard. Added a dismissible, inline CV reminder that shows only when no CV is uploaded (`jp.cvReminder` in localStorage); it is a normal card, not a popup. Rebuilt the CV panel: dashed drop zone with drag and drop, hidden file input behind a "Choose file" button, explicit Upload/Replace button, file card with Preview/Download/Remove, and a PDF preview modal (`createPortal`, ESC/backdrop close, Download + Close actions, blob URL revoked on close). Profile copy changes for first upload vs replace. README screenshots keep the landing page and now show the core flows instead of the sign-in pages.
+- Verified (commands + result):
+  - `npm run build` -> clean (73 modules, 351.75 kB JS / 50.07 kB CSS); `docker compose build frontend` + `up -d frontend` -> healthy on `:5174`.
+  - Playwright (bundled chromium) on a fresh candidate: reminder visible -> dismissed -> stayed hidden after reload; upload `mira-cv.pdf` -> file card; Preview -> modal with `blob:` iframe; Download -> `mira-cv.pdf`; reminder gone after upload; 0 px overflow at 500 px for profile and modal.
+  - Headed Chromium confirmed the PDF renders inside the modal at 1440 and 500 px (headless shows a blank iframe, see Gotchas).
+  - New screenshots: `cv-reminder-1440/500`, `cv-upload-empty-1440`, `cv-upload-ready-1440`, `candidate-profile-cv-1440/500`, `cv-preview-modal-1440/500`.
+- Not done / left half-way: no commit. No automated frontend test suite (manual Playwright only). M7 still next.
+- Gotchas/decisions added: modal portal for transformed ancestors; headless Chromium PDF iframe; screenshot timing vs page animation.
+- Next session should start with: M7 production Dockerfiles/compose/Caddy/CI.

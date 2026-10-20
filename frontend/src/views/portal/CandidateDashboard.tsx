@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Breakdown, PageHead, StatCard } from '../../components/portal';
@@ -7,30 +8,7 @@ import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useAsync } from '../../lib/useAsync';
 
-function completeness(profile: {
-  full_name: string;
-  headline: string;
-  location: string;
-  phone: string;
-  skills: string[];
-  summary: string;
-  has_resume: boolean;
-}): { percent: number; missing: string[] } {
-  const checks: [boolean, string][] = [
-    [Boolean(profile.full_name), 'your name'],
-    [Boolean(profile.headline), 'a headline'],
-    [Boolean(profile.location), 'your location'],
-    [Boolean(profile.phone), 'a phone number'],
-    [profile.skills.length > 0, 'skills'],
-    [Boolean(profile.summary), 'a short summary'],
-    [profile.has_resume, 'a CV'],
-  ];
-  const done = checks.filter(([filled]) => filled).length;
-  return {
-    percent: Math.round((done / checks.length) * 100),
-    missing: checks.filter(([filled]) => !filled).map(([, label]) => label),
-  };
-}
+const CV_REMINDER_KEY = 'jp.cvReminder';
 
 export function CandidateDashboard() {
   const { token, candidate } = useSession();
@@ -40,9 +18,48 @@ export function CandidateDashboard() {
   const roles = useAsync(() => api.candidate.searchJobs({ page: 1, pageSize: 3 }), []);
 
   const stats = dashboard.data?.applications.byStatus ?? {};
-  const profile = candidate
-    ? completeness(candidate)
-    : { percent: 0, missing: ['your profile'] };
+  const [cvReminderHidden, setCvReminderHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem(CV_REMINDER_KEY) === 'hidden';
+    } catch {
+      return false;
+    }
+  });
+  const showCvReminder = Boolean(candidate && !candidate.has_resume && !cvReminderHidden);
+
+  function hideCvReminder() {
+    setCvReminderHidden(true);
+    try {
+      window.localStorage.setItem(CV_REMINDER_KEY, 'hidden');
+    } catch {
+      return;
+    }
+  }
+
+  const applicationsCard = (
+    <section className="pcard">
+      <header className="pcard__head">
+        <div>
+          <h2 className="pcard__title">Your applications</h2>
+          <p className="pcard__sub">Where each one stands.</p>
+        </div>
+        <Link className="plink" to="/me/applications">
+          See all
+        </Link>
+      </header>
+      <div className="pcard__body">
+        <ErrorNote error={dashboard.error} plain />
+        {dashboard.loading && !dashboard.data ? <Skeleton lines={4} /> : null}
+        {dashboard.data ? (
+          <Breakdown
+            byStatus={stats}
+            order={['SUBMITTED', 'IN_REVIEW', 'SHORTLISTED', 'ACCEPTED', 'REJECTED']}
+            total={dashboard.data.applications.total}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
 
   return (
     <div className="pstack">
@@ -82,55 +99,33 @@ export function CandidateDashboard() {
         />
       </section>
 
-      <div className="twocol">
-        <section className="pcard">
-          <header className="pcard__head">
-            <div>
-              <h2 className="pcard__title">Profile strength</h2>
-              <p className="pcard__sub">Employers read this before your CV.</p>
+      {showCvReminder ? (
+        <div className="twocol">
+          <section className="cvmemo">
+            <span className="cvmemo__mark" aria-hidden="true">
+              PDF
+            </span>
+            <div className="cvmemo__text">
+              <h2 className="cvmemo__title">Add your CV when you are ready</h2>
+              <p>
+                A CV lets employers see your full history. Your profile works without one, so
+                there is no rush.
+              </p>
             </div>
-            <Link className="plink" to="/me/profile">
-              Improve
-            </Link>
-          </header>
-          <div className="pcard__body">
-            <div className="meter" aria-hidden="true">
-              <span className="meter__fill" style={{ width: `${profile.percent}%` }} />
+            <div className="cvmemo__actions">
+              <Link className="pbtn pbtn--primary" to="/me/profile">
+                Upload CV
+              </Link>
+              <button type="button" className="plink" onClick={hideCvReminder}>
+                Do not remind me
+              </button>
             </div>
-            <p className="meter__label">
-              <strong>{profile.percent}%</strong> complete
-            </p>
-            {profile.missing.length > 0 ? (
-              <p className="meta">Still missing: {profile.missing.join(', ')}.</p>
-            ) : (
-              <p className="meta">Everything is filled in. Nice.</p>
-            )}
-          </div>
-        </section>
-
-        <section className="pcard">
-          <header className="pcard__head">
-            <div>
-              <h2 className="pcard__title">Your applications</h2>
-              <p className="pcard__sub">Where each one stands.</p>
-            </div>
-            <Link className="plink" to="/me/applications">
-              See all
-            </Link>
-          </header>
-          <div className="pcard__body">
-            <ErrorNote error={dashboard.error} plain />
-            {dashboard.loading && !dashboard.data ? <Skeleton lines={4} /> : null}
-            {dashboard.data ? (
-              <Breakdown
-                byStatus={stats}
-                order={['SUBMITTED', 'IN_REVIEW', 'SHORTLISTED', 'ACCEPTED', 'REJECTED']}
-                total={dashboard.data.applications.total}
-              />
-            ) : null}
-          </div>
-        </section>
-      </div>
+          </section>
+          {applicationsCard}
+        </div>
+      ) : (
+        applicationsCard
+      )}
 
       <section className="pcard">
         <header className="pcard__head">
