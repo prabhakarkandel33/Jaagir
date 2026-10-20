@@ -143,3 +143,7 @@ RECONCILE_HTTP_TIMEOUT_SECONDS = env.reconcile_http_timeout_seconds
 # Internal endpoints + the Job Service internal URL (invariant I8).
 INTERNAL_TOKEN = env.internal_token
 JOB_SERVICE_INTERNAL_URL = env.job_service_internal_url
+
+# Admin site (frontend `/admin`). Credentials live in `.env`, never in the bundle.
+ADMIN_USERNAME = env.admin_username
+ADMIN_PASSWORD = env.admin_password

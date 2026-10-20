@@ -66,6 +66,10 @@ class ServiceSettings(BaseSettings):
     # Internal endpoints (invariant I8).
     internal_token: str = ""
 
+    # Admin site login (frontend `/admin`). Empty disables the login route.
+    admin_username: str = ""
+    admin_password: str = ""
+
     # JWT (asymmetric). Empty by default; auth wiring lands in M2.
     jwt_signing_key: str = ""
     jwt_public_key: str = ""

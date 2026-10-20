@@ -133,3 +133,7 @@ OUTBOX_RELAY_ENABLED = env.outbox_relay_enabled
 
 # Internal endpoints require this shared secret (invariant I8).
 INTERNAL_TOKEN = env.internal_token
+
+# Admin site (frontend `/admin`). Credentials live in `.env`, never in the bundle.
+ADMIN_USERNAME = env.admin_username
+ADMIN_PASSWORD = env.admin_password

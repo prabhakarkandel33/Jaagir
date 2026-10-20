@@ -1,47 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { Badge } from './components/ui';
-import { BASES, api } from './lib/api';
-import type { Readyz } from './lib/types';
+import { api } from './lib/api';
+import { Admin, type AdminTokens } from './views/Admin';
 import { Candidate, type CandidateSession } from './views/Candidate';
 import { Discover } from './views/Discover';
-import { Ops } from './views/Ops';
+import { Landing } from './views/Landing';
 import { Recruiter, type RecruiterSession } from './views/Recruiter';
 
-type Tab = 'discover' | 'recruiter' | 'candidate' | 'ops';
-type Signal = 'ok' | 'degraded' | 'down' | 'unknown';
-
-const TABS: { id: Tab; label: string; hint: string; say: string }[] = [
-  {
-    id: 'discover',
-    label: 'Discover',
-    hint: 'Search, read, apply',
-    say: 'Search either copy, read the job, apply.',
-  },
-  {
-    id: 'recruiter',
-    label: 'Recruiter',
-    hint: 'Jobs and applicants',
-    say: 'Write jobs, publish them, read applicants.',
-  },
-  {
-    id: 'candidate',
-    label: 'Candidate',
-    hint: 'Profile and history',
-    say: 'Keep the profile current and track applications.',
-  },
-  {
-    id: 'ops',
-    label: 'Ops',
-    hint: 'Outbox, sync, DLQ',
-    say: 'Outbox, snapshot, reconciliation, and the DLQ.',
-  },
-];
-
-function tabFromHash(): Tab {
-  const value = window.location.hash.replace('#', '');
-  return TABS.some((item) => item.id === value) ? (value as Tab) : 'discover';
-}
+const PUBLIC_PATHS = ['/', '/jobs', '/employers', '/me'];
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -64,242 +30,163 @@ function store(key: string, value: unknown): void {
   }
 }
 
-function fromReady(ready: Readyz | null): Signal {
-  if (!ready) return 'unknown';
-  return ready.status === 'ok' ? 'ok' : 'degraded';
-}
-
-function fromCheck(value: string | undefined): Signal {
-  if (value === 'ok' || value === 'up') return 'ok';
-  if (value === 'degraded' || value === 'stale') return 'degraded';
-  if (value === 'down') return 'down';
-  return 'unknown';
-}
-
-function combine(values: (string | undefined)[]): Signal {
-  const states = values.map(fromCheck);
-  if (states.some((state) => state === 'down')) return 'down';
-  if (states.some((state) => state === 'degraded')) return 'degraded';
-  if (states.length > 0 && states.every((state) => state === 'ok')) return 'ok';
-  return 'unknown';
-}
-
-function tone(state: Signal): 'ok' | 'warn' | 'danger' | 'muted' {
-  if (state === 'ok') return 'ok';
-  if (state === 'degraded') return 'warn';
-  if (state === 'down') return 'danger';
-  return 'muted';
-}
-
-function SignalPath({ nodes }: { nodes: { id: string; label: string; state: Signal }[] }) {
-  const spoken = nodes.map((node) => `${node.label} ${node.state}`).join(', ');
-  return (
-    <div className="signal" role="img" aria-label={`Pipeline: ${spoken}`}>
-      <span className="signal__track" aria-hidden="true" />
-      {nodes.map((node) => (
-        <div key={node.id} className={`signal__node is-${node.state}`}>
-          <span className="signal__dot" aria-hidden="true">
-            <span key={node.state} className="signal__halo" />
-          </span>
-          <span className="signal__label">{node.label}</span>
-          <span className="signal__state">{node.state}</span>
-        </div>
-      ))}
-    </div>
-  );
+function currentPath(): string {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  return path === '' ? '/' : path;
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [path, setPath] = useState<string>(currentPath);
+
   const [recruiterSession, setRecruiterSession] = useState<RecruiterSession | null>(() =>
     readStored<RecruiterSession | null>('jp.recruiter', null),
   );
   const [candidateSession, setCandidateSession] = useState<CandidateSession | null>(() =>
     readStored<CandidateSession | null>('jp.candidate', null),
   );
-  const [internalToken, setInternalToken] = useState<string>(() =>
-    readStored<string>('jp.internal', ''),
+  const [adminTokens, setAdminTokens] = useState<AdminTokens | null>(() =>
+    readStored<AdminTokens | null>('jp.admin', null),
   );
+  const [openRoles, setOpenRoles] = useState<number | null>(null);
 
-  const [jobReady, setJobReady] = useState<Readyz | null>(null);
-  const [candidateReady, setCandidateReady] = useState<Readyz | null>(null);
+  const go = useCallback((next: string) => {
+    if (currentPath() !== next) {
+      window.history.pushState({}, '', next);
+    }
+    setPath(next);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   useEffect(() => {
-    const sync = () => setTab(tabFromHash());
-    window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+    const sync = () => setPath(currentPath());
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
   }, []);
 
   useEffect(() => store('jp.recruiter', recruiterSession), [recruiterSession]);
   useEffect(() => store('jp.candidate', candidateSession), [candidateSession]);
-  useEffect(() => store('jp.internal', internalToken), [internalToken]);
+  useEffect(() => store('jp.admin', adminTokens), [adminTokens]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      const [job, candidate] = await Promise.all([
-        api.job.ready().catch(() => null),
-        api.candidate.ready().catch(() => null),
-      ]);
-      if (cancelled) return;
-      setJobReady(job);
-      setCandidateReady(candidate);
-    }
-    void check();
-    const timer = window.setInterval(() => void check(), 20000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+    document.body.dataset.world = path === '/admin' ? 'admin' : 'public';
+  }, [path]);
 
-  const jobState = fromReady(jobReady);
-  const candidateState = fromReady(candidateReady);
-  const kafkaState = combine([jobReady?.checks.kafka, candidateReady?.checks.kafka]);
-  const current = TABS.find((item) => item.id === tab) ?? TABS[0];
+  useEffect(() => {
+    api.candidate
+      .searchJobs({ page: 1, pageSize: 1 })
+      .then((page) => setOpenRoles(page.total))
+      .catch(() => setOpenRoles(null));
+  }, [path]);
 
-  function selectTab(next: Tab) {
-    setTab(next);
-    window.location.hash = next;
+  if (path === '/admin') {
+    return <Admin tokens={adminTokens} onTokens={setAdminTokens} />;
   }
 
+  const route = PUBLIC_PATHS.includes(path) ? path : '/';
+
   return (
-    <div className="app">
-      <aside className="rail">
-        <div className="brand">
-          <span className="brand__mark" aria-hidden="true">
-            ज
+    <div className="site">
+      <header className="sitehead">
+        <a
+          className="wordmark"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            go('/');
+          }}
+        >
+          <span className="wordmark__deva" lang="hi">
+            जागीर
           </span>
-          <div className="brand__text">
-            <h1 className="brand__name" lang="hi">
-              जागीर
-            </h1>
-            <p className="brand__latin">Jaagir · job portal</p>
-          </div>
-        </div>
+          <span className="wordmark__latin">job portal</span>
+        </a>
 
-        <p className="brand__note">One workbench for both services and every endpoint.</p>
-
-        <section className="rail__block" aria-label="Pipeline status">
-          <SignalPath
-            nodes={[
-              { id: 'job', label: 'Job API', state: jobState },
-              { id: 'kafka', label: 'Kafka', state: kafkaState },
-              { id: 'candidate', label: 'Candidate', state: candidateState },
-            ]}
-          />
-          <dl className="checks">
-            <div>
-              <dt>Job</dt>
-              <dd>
-                <Badge tone={tone(fromCheck(jobReady?.checks.database))}>
-                  db {jobReady?.checks.database ?? 'unknown'}
-                </Badge>
-                <Badge tone={tone(fromCheck(jobReady?.checks.kafka))}>
-                  kafka {jobReady?.checks.kafka ?? 'unknown'}
-                </Badge>
-              </dd>
-            </div>
-            <div>
-              <dt>Candidate</dt>
-              <dd>
-                <Badge tone={tone(fromCheck(candidateReady?.checks.database))}>
-                  db {candidateReady?.checks.database ?? 'unknown'}
-                </Badge>
-                <Badge tone={tone(fromCheck(candidateReady?.checks.consumer ?? candidateReady?.checks.kafka))}>
-                  consumer {candidateReady?.checks.consumer ?? 'unknown'}
-                </Badge>
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <nav className="nav" aria-label="Sections">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="nav__item"
-              aria-current={tab === item.id ? 'page' : undefined}
-              onClick={() => selectTab(item.id)}
-            >
-              <span className="nav__label">{item.label}</span>
-              <span className="nav__hint">{item.hint}</span>
-            </button>
-          ))}
+        <nav className="sitenav" aria-label="Main">
+          <a
+            href="/jobs"
+            aria-current={route === '/jobs' ? 'page' : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              go('/jobs');
+            }}
+          >
+            Find jobs
+          </a>
+          <a
+            href="/employers"
+            aria-current={route === '/employers' ? 'page' : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              go('/employers');
+            }}
+          >
+            For employers
+          </a>
         </nav>
 
-        <div className="rail__foot">
-          <p className="rail__who">
-            {recruiterSession ? `Recruiter: ${recruiterSession.profile.full_name}` : 'No recruiter'}
-            <br />
-            {candidateSession ? `Candidate: ${candidateSession.profile.full_name}` : 'No candidate'}
-          </p>
-          <p className="rail__urls mono">
-            {BASES.job.replace(/^https?:\/\//, '')}
-            <br />
-            {BASES.candidate.replace(/^https?:\/\//, '')}
-          </p>
-          <div className="row row--wrap">
-            <a className="link link--small" href={`${BASES.job}/docs`} target="_blank" rel="noreferrer">
-              Job API docs
-            </a>
+        <div className="sitehead__account">
+          {candidateSession ? (
             <a
-              className="link link--small"
-              href={`${BASES.candidate}/docs`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Candidate API docs
-            </a>
-          </div>
-          {recruiterSession || candidateSession || internalToken ? (
-            <button
-              type="button"
-              className="link link--small"
-              onClick={() => {
-                setRecruiterSession(null);
-                setCandidateSession(null);
-                setInternalToken('');
+              className="pill"
+              href="/me"
+              onClick={(event) => {
+                event.preventDefault();
+                go('/me');
               }}
             >
-              Clear saved sessions
-            </button>
-          ) : null}
+              Hi, {candidateSession.profile.full_name.split(' ')[0]}
+            </a>
+          ) : (
+            <a
+              className="cta cta--small cta--primary"
+              href="/me"
+              onClick={(event) => {
+                event.preventDefault();
+                go('/me');
+              }}
+            >
+              Sign in
+            </a>
+          )}
         </div>
-      </aside>
+      </header>
 
-      <main className="board">
-        <header className="board__head">
-          <div>
-            <h2 className="board__title">{current.label}</h2>
-            <p className="board__say">{current.say}</p>
-          </div>
-          <p className="board__meta mono">
-            {tab === 'ops' ? 'internal routes need the token' : 'tokens stay in this browser'}
-          </p>
-        </header>
+      <main className="sitemain">
+        {route === '/' ? <Landing go={go} /> : null}
 
-        {tab === 'discover' ? (
+        {route === '/jobs' ? (
           <Discover
             candidateToken={candidateSession?.token ?? null}
             candidateName={candidateSession?.profile.full_name ?? null}
-            onNeedCandidate={() => selectTab('candidate')}
+            onOpenAccount={() => go('/me')}
           />
         ) : null}
 
-        {tab === 'recruiter' ? (
+        {route === '/employers' ? (
           <Recruiter session={recruiterSession} onSession={setRecruiterSession} />
         ) : null}
 
-        {tab === 'candidate' ? (
-          <Candidate session={candidateSession} onSession={setCandidateSession} />
-        ) : null}
-
-        {tab === 'ops' ? (
-          <Ops internalToken={internalToken} onInternalToken={setInternalToken} />
+        {route === '/me' ? (
+          <Candidate
+            session={candidateSession}
+            onSession={setCandidateSession}
+            onExplore={() => go('/jobs')}
+            onEmployer={() => go('/employers')}
+          />
         ) : null}
       </main>
+
+      <footer className="sitefoot">
+        <p className="sitefoot__brand">
+          <span lang="hi">जागीर</span> · good work, good people
+        </p>
+        <p className="sitefoot__meta">
+          {openRoles === null ? 'Roles updated every day' : `${openRoles.toLocaleString()} open roles`}
+        </p>
+        <a className="sitefoot__ops" href="/admin">
+          Ops console
+        </a>
+      </footer>
     </div>
   );
 }

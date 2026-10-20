@@ -70,6 +70,10 @@ class ServiceSettings(BaseSettings):
     internal_token: str = ""
     job_service_internal_url: str = "http://localhost:3001"
 
+    # Admin site login (frontend `/admin`). Empty disables the login route.
+    admin_username: str = ""
+    admin_password: str = ""
+
     # JWT: this service signs candidate tokens; it verifies recruiter tokens
     # with the Job Service public key.
     jwt_signing_key: str = ""

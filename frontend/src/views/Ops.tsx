@@ -10,33 +10,24 @@ import {
   Panel,
   statusTone,
 } from '../components/ui';
-import { BASES, api, onWire, type WireEntry } from '../lib/api';
+import { api, onWire, type WireEntry } from '../lib/api';
 import { formatDate, formatRelative } from '../lib/format';
 import type {
   DlqReplayResult,
-  Health,
   JobSnapshot,
   OutboxStatus,
-  Readyz,
   ReconcileResult,
   SnapshotPage,
   SyncStatus,
 } from '../lib/types';
 
-type Probe = { health: Health | null; ready: Readyz | null; error: unknown };
-
-const EMPTY_PROBE: Probe = { health: null, ready: null, error: null };
-
 export function Ops({
-  internalToken,
-  onInternalToken,
+  jobToken,
+  candidateToken,
 }: {
-  internalToken: string;
-  onInternalToken: (token: string) => void;
+  jobToken: string;
+  candidateToken: string;
 }) {
-  const [jobProbe, setJobProbe] = useState<Probe>(EMPTY_PROBE);
-  const [candidateProbe, setCandidateProbe] = useState<Probe>(EMPTY_PROBE);
-  const [probing, setProbing] = useState(false);
 
   const [outbox, setOutbox] = useState<OutboxStatus | null>(null);
   const [outboxError, setOutboxError] = useState<unknown>(null);
@@ -68,27 +59,10 @@ export function Ops({
 
   useEffect(() => onWire((entry) => setWire((prev) => [entry, ...prev].slice(0, 40))), []);
 
-  async function probe() {
-    setProbing(true);
-    setJobProbe(EMPTY_PROBE);
-    setCandidateProbe(EMPTY_PROBE);
-    const [job, candidate] = await Promise.all([
-      Promise.all([api.job.health(), api.job.ready()])
-        .then(([health, ready]) => ({ health, ready, error: null }) as Probe)
-        .catch((error: unknown) => ({ health: null, ready: null, error }) as Probe),
-      Promise.all([api.candidate.health(), api.candidate.ready()])
-        .then(([health, ready]) => ({ health, ready, error: null }) as Probe)
-        .catch((error: unknown) => ({ health: null, ready: null, error }) as Probe),
-    ]);
-    setJobProbe(job);
-    setCandidateProbe(candidate);
-    setProbing(false);
-  }
-
   async function loadOutbox() {
     setOutboxError(null);
     try {
-      setOutbox(await api.job.outbox(internalToken));
+      setOutbox(await api.job.outbox(jobToken));
     } catch (cause) {
       setOutboxError(cause);
       setOutbox(null);
@@ -98,7 +72,7 @@ export function Ops({
   async function loadSync() {
     setSyncError(null);
     try {
-      setSync(await api.candidate.syncStatus(internalToken));
+      setSync(await api.candidate.syncStatus(candidateToken));
     } catch (cause) {
       setSyncError(cause);
       setSync(null);
@@ -110,7 +84,7 @@ export function Ops({
     setReconcileError(null);
     setReconcileResult(null);
     try {
-      setReconcileResult(await api.candidate.reconcile(internalToken, reconcileMode));
+      setReconcileResult(await api.candidate.reconcile(candidateToken, reconcileMode));
       await loadSync();
     } catch (cause) {
       setReconcileError(cause);
@@ -124,7 +98,7 @@ export function Ops({
     setDlqError(null);
     setDlqResult(null);
     try {
-      setDlqResult(await api.candidate.dlqReplay(internalToken, dlqLimit, dryRun));
+      setDlqResult(await api.candidate.dlqReplay(candidateToken, dlqLimit, dryRun));
     } catch (cause) {
       setDlqError(cause);
     } finally {
@@ -136,7 +110,7 @@ export function Ops({
     setSnapshotBusy(true);
     setSnapshotError(null);
     try {
-      const data = await api.job.snapshot(internalToken, cursor || undefined, snapshotLimit);
+      const data = await api.job.snapshot(jobToken, cursor || undefined, snapshotLimit);
       setSnapshot(data);
       setAfter(cursor);
     } catch (cause) {
@@ -153,7 +127,7 @@ export function Ops({
     setLookupError(null);
     setLookup(null);
     try {
-      setLookup(await api.job.internalJob(internalToken, lookupId.trim()));
+      setLookup(await api.job.internalJob(jobToken, lookupId.trim()));
     } catch (cause) {
       setLookupError(cause);
     } finally {
@@ -163,111 +137,6 @@ export function Ops({
 
   return (
     <div className="stack">
-      <Panel
-        title="Connection"
-        service="both"
-        subtitle="Internal routes are blocked at the public proxy. A token is required here."
-        actions={
-          <Button variant="ghost" onClick={() => void probe()} busy={probing}>
-            Probe both
-          </Button>
-        }
-      >
-        <Field label="X-Internal-Token" hint="Stored in this browser only. Never sent anywhere else." wide>
-          <input
-            className="input"
-            type="password"
-            value={internalToken}
-            onChange={(event) => onInternalToken(event.target.value)}
-            placeholder="paste the INTERNAL_TOKEN value"
-          />
-        </Field>
-
-        <div className="split split--tight">
-          <div className="probe">
-            <div className="probe__head">
-              <h3 className="probe__name">Job service</h3>
-              <span className="mono probe__url">{BASES.job}</span>
-            </div>
-            <ErrorNote error={jobProbe.error} />
-            {jobProbe.ready ? (
-              <dl className="facts">
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <Badge tone={statusTone(jobProbe.ready.status)}>{jobProbe.ready.status}</Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Database</dt>
-                  <dd>
-                    <Badge tone={statusTone(jobProbe.ready.checks.database)}>
-                      {jobProbe.ready.checks.database}
-                    </Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Kafka</dt>
-                  <dd>
-                    <Badge tone={statusTone(jobProbe.ready.checks.kafka)}>
-                      {jobProbe.ready.checks.kafka}
-                    </Badge>
-                  </dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="meta">Probe to read /healthz and /readyz.</p>
-            )}
-          </div>
-
-          <div className="probe">
-            <div className="probe__head">
-              <h3 className="probe__name">Candidate service</h3>
-              <span className="mono probe__url">{BASES.candidate}</span>
-            </div>
-            <ErrorNote error={candidateProbe.error} />
-            {candidateProbe.ready ? (
-              <dl className="facts">
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <Badge tone={statusTone(candidateProbe.ready.status)}>
-                      {candidateProbe.ready.status}
-                    </Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Database</dt>
-                  <dd>
-                    <Badge tone={statusTone(candidateProbe.ready.checks.database)}>
-                      {candidateProbe.ready.checks.database}
-                    </Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Consumer</dt>
-                  <dd>
-                    <Badge tone={statusTone(candidateProbe.ready.checks.consumer ?? 'unknown')}>
-                      {candidateProbe.ready.checks.consumer ?? 'unknown'}
-                    </Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Kafka</dt>
-                  <dd>
-                    <Badge tone={statusTone(candidateProbe.ready.checks.kafka)}>
-                      {candidateProbe.ready.checks.kafka}
-                    </Badge>
-                  </dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="meta">Probe to read /healthz and /readyz.</p>
-            )}
-          </div>
-        </div>
-      </Panel>
-
       <Panel
         title="Outbox"
         service="job"

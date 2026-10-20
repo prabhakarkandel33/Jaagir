@@ -16,7 +16,27 @@ Design: `ARCHITECTURE.md`. Work queue and status: `CONTEXT.md`. Agent rules: `AG
 
 ## Status
 
-M1-M6 complete, M7 in progress (frontend image done). See `CONTEXT.md` > Status board.
+M1-M6 complete, M7 in progress (frontend image + admin console done). See `CONTEXT.md` > Status board.
+
+## Screenshots
+
+Public site: warm, plain language, built for job seekers and employers.
+
+| Landing | Find jobs |
+|---|---|
+| ![Landing page](docs/screenshots/landing.png) | ![Job search](docs/screenshots/jobs.png) |
+
+| Live search | Job seeker sign in |
+|---|---|
+| ![Search for python](docs/screenshots/search-python.png) | ![Job seeker sign in](docs/screenshots/job-seeker.png) |
+
+| Employer sign in |
+|---|
+| ![Employer sign in](docs/screenshots/employers.png) |
+
+Ops console: dark, technical, for operators.
+
+![Admin sign-in](docs/screenshots/admin.png)
 
 ## Local setup (one command, all containers)
 
@@ -29,7 +49,7 @@ docker compose build
 docker compose up -d
 ```
 
-Open `http://localhost:5174` for the UI (`#discover`, `#recruiter`, `#candidate`, `#ops`).
+Open `http://localhost:5174` for the public site (`/`, `/jobs`, `/employers`, `/me`) and `http://localhost:5174/admin` for the technical ops console.
 APIs: `http://localhost:3001`, `http://localhost:3002`, docs at `/docs` on each.
 
 No host Node process is needed. Rebuild with `docker compose build` after a code or `VITE_*` change, then `docker compose up -d`.

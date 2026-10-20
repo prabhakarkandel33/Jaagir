@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   Application,
   AuthSession,
   Candidate,
@@ -309,3 +309,16 @@ export const api = {
   },
 };
 
+export type AdminLoginResponse = { service: string; token: string };
+
+/** Admin-site login: the credentials live in each service `.env`. */
+export function adminLogin(
+  service: 'job' | 'candidate',
+  username: string,
+  password: string,
+): Promise<AdminLoginResponse> {
+  return request<AdminLoginResponse>(service, '/internal/admin/login', {
+    method: 'POST',
+    body: { username, password },
+  });
+}

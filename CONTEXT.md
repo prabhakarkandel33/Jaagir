@@ -10,12 +10,12 @@ Living project memory and **the work queue**. Every session reads this first and
 
 ```
 Current milestone : M7
-State             : IN PROGRESS (frontend image + dev-full frontend service done; prod compose, Caddy, deploy scripts, CI pending)
-Last session      : S9 (2026-10-20)
+State             : IN PROGRESS (frontend image + public site + admin console done; prod compose, Caddy, deploy scripts, CI pending)
+Last session      : S11 (2026-10-20)
 Next action       : M7: prod Dockerfiles for both Django services, deploy/docker-compose.prod.yml, deploy/Caddyfile, deploy/scripts/*, ci.yml + deploy.yml, docs/deployment.md
-Last green verify : 2026-10-20 (ruff clean, format 141 files, mypy x3 Success, pytest 11 + 80 + 57 = 148)
+Last green verify : 2026-10-20 (ruff clean, format 145 files, mypy x3 Success, pytest 11 + 85 + 60 = 156)
 Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
-Frontend          : design pass done + prod image builds; containerized on :5174 (nginx-unprivileged), `npm run build` clean
+Frontend          : two worlds: public site (warm paper, no jargon) + `/admin` ops console (dark, technical); live search, side-by-side role detail, README screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean
 
 Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [ ] M7  [ ] M8  [ ] M9`
 
@@ -143,6 +143,9 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
 ### M7: Containerization and CI/CD
 - [x] Frontend image: `frontend/Dockerfile` (multi-stage `node:22-slim` build -> `nginxinc/nginx-unprivileged:1.27-alpine`, non-root uid 101, port 8080, `/healthz`, `HEALTHCHECK`), `frontend/nginx.conf` (SPA fallback, immutable `/assets` cache, security headers), `frontend/.dockerignore`, and a `frontend` service in `deploy/docker-compose.dev-full.yml` (`:5174`, waits for both web healthchecks).
   - [2026-10-20, S9] `docker compose -f deploy/docker-compose.dev-full.yml up -d --build frontend` -> container healthy; `curl.exe http://localhost:5174/healthz` -> 200 `ok`; `/` and `/ops` -> 200 (SPA fallback); screenshot of `:5174` matches the dev design and shows live search results. API bases are Vite build args (`VITE_JOB_SERVICE_URL`, `VITE_CANDIDATE_SERVICE_URL`), so changing them needs an image rebuild.
+- [x] Two-world UI (human-requested): public site (`/`, `/jobs`, `/employers`, `/me`) in a warm paper theme with plain language, larger type, and a landing page; technical ops console at `/admin` on the existing dark theme, signed in with `ADMIN_USERNAME`/`ADMIN_PASSWORD` from each service `.env` via `POST /internal/admin/login`. Path routing replaces hash tabs; every page is served by the nginx container on `:5174`.
+  - [2026-10-20, S10] `npm run build` clean (41 modules). Live on `:5174`: `/`, `/jobs`, `/employers`, `/me`, `/admin` -> 200; `POST :3001/internal/admin/login` and `:3002/...` return `{service, token}`; wrong credentials -> 401. Headless Edge screenshots at 1440 px and 500 px: landing, jobs (209,168 live results), employer sign-in, candidate sign-in, admin sign-in. `./tasks.ps1 verify` -> ruff clean, format 145 files, mypy x3, pytest 11 + 85 + 60 = 156.
+
 - [ ] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `node:22-slim`, non-root, prod deps only, `HEALTHCHECK` via node fetch, `.dockerignore`).
 - [ ] `deploy/docker-compose.prod.yml`: caddy, kafka (heap capped, volume), job-db, candidate-db (volumes, healthchecks), job-service, candidate-service, `*-migrate` one-shot services, log rotation, `mem_limit`s per §11 budget, only Caddy publishes ports, private network.
 - [ ] `deploy/Caddyfile`: both domains from env, `/internal/*` -> 404, security headers, `reverse_proxy`; support `tls internal` / staging ACME for testing.
@@ -262,8 +265,16 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-20, M7] Vite inlines `import.meta.env` at build time, so the frontend image is environment-specific: change `VITE_*` build args and rebuild. Do not expect runtime env vars in the container to change the API base.
 - [2026-10-20, M7] Running `docker compose` from a new file changes the default project name to the directory name (`jaagir`), which silently creates NEW containers and NEW named volumes: the 100k seeded rows and all users appear lost. Fix: pin `name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}` in the root file, or pass `-p jobportal-dev`. Always compare `docker compose ls` before and after a compose refactor.
 - [2026-10-20, M7] A top-level `include:` file does not inherit `name:` from the included file; the including file's directory decides it (see above). `name:` in the root file does win over the included file's `name:`.
+- [2026-10-20, M7] `AuthRateThrottle` extended `ScopedRateThrottle` with `scope = "auth"`, but DRF overwrites the scope from `view.throttle_scope`; with no `throttle_scope` on the view it returned `True` and auth routes were never throttled. Fix: subclass `SimpleRateThrottle` and implement `get_cache_key` (user pk or client IP). Both services now do this.
+- [2026-10-20, M7] Headless Edge screenshots catch CSS entry animations mid-fade: the hero title looked low-contrast because `opacity: 0` was still animating. Add `--virtual-time-budget=6000` to let fetches and animations settle before the shot.
+- [2026-10-20, M7] The admin sign-in calls BOTH services in one `Promise.all`; if the two `.env` files hold different `ADMIN_PASSWORD` values, one call returns 401 and the whole sign-in fails. Keep `ADMIN_USERNAME`/`ADMIN_PASSWORD` identical locally. The returned token is the service's `INTERNAL_TOKEN`.
+- [2026-10-20, M7] An old Vite dev server kept port 5173 open. The shipped portal publishes the nginx container on **5174** (user's chosen port) and needs no host Node process; kill stray dev servers before blaming the container.
+- [2026-10-20, M7] The job list label showed the new query against the old totals (`209,168 roles for "python"` while typing). Cause: the label read the draft input but the list still held the previous response. Fix: `applied` filters state set at request start + a request sequence guard, and a 350 ms debounce so typing feels live but every count matches its rows.
+- [2026-10-20, M7] The role detail rendered after the list and pager, so "View role" forced a long scroll. Fix: two-column results grid with a sticky detail panel above 980 px, and `scrollIntoView` on selection below it.
+- [2026-10-20, M7] Back-to-back headless Edge `--screenshot` launches reuse the default profile; the second and later writes silently produce no file. Fix: give each capture a unique `--user-data-dir` and pause briefly between runs. Screenshots live in `docs/screenshots/`; capture sign-in screens only, never a signed-in session with tokens or personal data.
 
 ---
+
 
 ## 5. Decisions log (append-only)
 
@@ -307,8 +318,15 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-20, M7] Frontend visual pass (pre-M7, human-requested): kept the existing design world (petrol ink, warm paper, amber = Job API, teal = Candidate) and refined it instead of replacing it. Wordmark is Devanagari (`जागीर`) plus a small Latin line; the signal path (Job API -> Kafka -> Candidate) is the single authored motion moment; kickers/eyebrows and colored left bars were removed per the craft-floor rules. Why: the human asked for "good, not over the top". Rejected: a full redesign (the world was already distinctive), new UI dependencies (none added).
 - [2026-10-20, M7] The frontend container is a multi-stage build (`node:22-slim` -> `nginxinc/nginx-unprivileged`) because production needs only static files; Caddy still terminates TLS in front of it. Why: small runtime image, no Node process in production, non-root by default. Rejected: `vite preview` in the container (dev server in prod), a Node server process (extra surface, more RAM).
 - [2026-10-20, M7] Added a root `docker-compose.yml` that only sets the project name and includes `deploy/docker-compose.dev-full.yml`, so the default commands `docker compose build` and `docker compose up -d` (run from the repo root) start the whole stack, frontend included. Why: the human wants zero host processes and no `npm run dev`. Rejected: duplicating all service definitions at the root (two sources of truth), telling the user to pass `-f` (easy to forget, and a wrong `-f` changes the project name and the volumes).
+- [2026-10-20, M7] Two visual worlds in one SPA: the public site uses a warm paper theme, plain language, larger type, and soft motion; `/admin` keeps the dark technical console and may use jargon (Kafka, outbox, DLQ, JSON). Why: human direction; recruiters and candidates must not read infrastructure terms, while operators need them. Routing is path-based (`/`, `/jobs`, `/employers`, `/me`, `/admin`) so links are shareable and nginx SPA fallback serves every page.
+- [2026-10-20, M7] Admin authentication is `POST /internal/admin/login` with `{username, password}` compared against `ADMIN_USERNAME`/`ADMIN_PASSWORD` from each service `.env`; it returns that service's `INTERNAL_TOKEN` as `{service, token}`. The console signs in to both services at once and keeps the tokens in `localStorage`. Why: operators should not paste raw internal tokens; credentials stay out of git (I6). Rejected: a separate admin user table (no need for one account), reusing recruiter JWTs (wrong audience, no ops permissions).
+- [2026-10-20, M7] The whole portal (public site and `/admin`) is served by the frontend nginx container on **5174**; there is no separate admin port and no host Vite process. Why: human direction ("the whole portal runs on 5174"). Rejected: a second container/port for admin (unnecessary), dev server on 5173 (requires host Node).
+- [2026-10-20, M7] Job search runs live with a 350 ms debounce; the result count and the rows come from the same response, and the `q`/filter values are mirrored into the URL with `replaceState` (shareable links, no extra history entries). Why: the human reported a count that did not match the rows and asked for real-time search or an honest label. Rejected: keeping click-only search (slower), updating the label before the response (the original bug).
+- [2026-10-20, M7] Role detail sits beside the results in a sticky column above 980 px and scrolls into view on selection below it. Why: "View role" forced a long scroll past the list and pager. Rejected: a modal (hides context, extra focus handling).
+- [2026-10-20, M7] The account pages name their audience in the heading: "Job seeker sign in" at `/me`, "Employer sign in" at `/employers`, plus a cross-link ("Hiring instead?" / browse roles). Why: the human could not tell which account `/me` was for. Rejected: an eyebrow label above the heading (violates the public craft-floor rules).
 
 ---
+
 
 ## 6. Blocked / needs human
 
@@ -434,3 +452,28 @@ Template:
 - Not done / left half-way: no true 390 px check (headless Edge clamps the viewport to ~486 px; see Gotchas). No bundled Devanagari font yet, so the wordmark uses Nirmala UI on this box and another font on macOS/Linux. M7 prod compose/Caddy/deploy scripts/CI still open.
 - Gotchas/decisions added: Edge viewport clamp; PowerShell non-ASCII/BOM handling; write-tool BOM retention; `workdir`-relative .NET paths; Nirmala-only Devanagari rendering; nginx-unprivileged port 8080 + BusyBox wget; Vite build-time env. Decisions: refine (not replace) the design world; signal path as the only authored motion; static nginx image behind Caddy.
 - Next session should start with: M7 prod Dockerfiles for both Django services, `deploy/docker-compose.prod.yml`, `deploy/Caddyfile` (two domains, `/internal/*` -> 404), `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`. Optional frontend follow-up: bundle a subsetted Devanagari font and serve same-origin API paths behind Caddy (removes CORS from prod).
+
+### Session 10: 2026-10-20: Two-world frontend + admin login (pre-M7)
+- Did: split the SPA into a public site and a technical admin console. Added path routing in `App.tsx` (`/`, `/jobs`, `/employers`, `/me`, `/admin`), a public shell (wordmark, nav, account pill, footer) and `body[data-world]` theming. New `views/Landing.tsx` (hero with live open-role count, "I am looking for work" / "I am hiring", three steps). New `public.css` warm paper theme with larger type, glow drift, card float, hover lift, and reduced-motion guards; `views/Ops.tsx` moved behind `views/Admin.tsx` (dark) and now takes `jobToken`/`candidateToken` instead of a pasted internal token. Rewrote `Discover`, `Recruiter`, `Candidate` copy and layout for plain language (no service names, ids, versions, JSON, replica/throttle talk); engineer-facing detail stays only in `/admin`. Backend: `POST /internal/admin/login` in both services (`apps/core/admin_views.py`) comparing `ADMIN_USERNAME`/`ADMIN_PASSWORD` (constant-time) and returning `{service, token}` = `INTERNAL_TOKEN`; new `ADMIN_*` settings/env; tests 5 + 3. Fixed the real `AuthRateThrottle` bug (see Gotchas). Changed the frontend container to publish **5174** (whole portal); removed the stale host Vite process. Root compose/README updated.
+- Verified (commands + result):
+  - `npm run build` -> clean (41 modules; 279.8 kB JS / 34.9 kB CSS).
+  - `docker compose build frontend` + `up -d frontend` -> healthy; `/healthz` 200; `/`, `/jobs`, `/employers`, `/me`, `/admin` -> 200 on `:5174`.
+  - `POST :3001/internal/admin/login` and `:3002/internal/admin/login` with the dev credentials -> `{"service":"job","token":"..."}` / `{"service":"candidate","token":"..."}`.
+  - Live `:5174/jobs` -> 209,168 roles with live results; headings, filters, cards, footers readable at 1440 px and 500 px (screenshots).
+  - `./tasks.ps1 verify` -> ruff clean, format 145 files, mypy Success x3, pytest 11 + 85 + 60 = 156.
+- Not done / left half-way: no true 390 px check (Edge clamps to ~486). Admin dashboard body (after sign-in) was type-checked and the login screen screenshotted, but not exercised in a real browser session; manual step: sign in at `/admin` with `admin` / the `.env` password and confirm outbox/sync/DLQ panels load. M7 prod compose/Caddy/deploy scripts/CI still open.
+- Gotchas/decisions added: throttle scope bug; screenshot animation timing (`--virtual-time-budget`); two `.env` admin passwords must match; stale Vite on 5173. Decisions: two visual worlds; env-based admin login returning the internal token; one container/port (5174) for everything.
+- Next session should start with: M7 prod Dockerfiles for both Django services, `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`.
+
+### Session 11: 2026-10-20: Frontend fixes + README screenshots (pre-M7)
+- Did: fixed the three issues the human reported on the public site. (1) `/me` now says "Job seeker sign in" / "Create a job seeker account" and cross-links to the employer sign in; `/employers` says "Employer sign in" (headings name the audience; no eyebrow labels). (2) Job search is live: 350 ms debounce, `applied` filters drive the label and pager, a request sequence guard drops stale responses, the URL mirrors the filters with `replaceState`, and "Clear filters" only appears when a filter is active. `Discover.tsx` was reorganised into a results list plus a sticky detail column. (3) Role detail sits beside the list at >= 981 px and scrolls into view on narrow screens; added a Close button. Added `docs/screenshots/{landing,jobs,search-python,job-seeker,employers,admin}.png` (1440x1000, headless Edge, sign-in screens only) and a Screenshots section to `README.md`. Updated `.env.example` CORS examples from 5173 to 5174.
+- Verified (commands + result):
+  - `npm run build` -> clean (41 modules, 281.96 kB JS / 35.68 kB CSS).
+  - `docker compose build frontend && docker compose up -d frontend` -> healthy; :5174 serves the new bundle (`index-BN9Ou5uG.js`).
+  - Live deep link `:5174/jobs?q=python` -> label `18,806 roles for "python"` with matching rows (screenshot); browse shows `209,168 roles` with no query label.
+  - `/me` DOM contains "Job seeker sign in" and "Go to the employer sign in"; `/employers` screenshot shows "Employer sign in".
+  - `./tasks.ps1 verify` -> ruff clean, 145 files formatted, mypy Success x3, pytest 11 + 85 + 60 = 156.
+  - README screenshots render from repo-relative paths (`docs/screenshots/*.png`).
+- Not done / left half-way: none in this slice. Admin dashboard after sign-in still not exercised in a real browser session. M7 prod images/compose/Caddy/scripts/CI still open.
+- Gotchas/decisions added: applied-filters label bug + sequence guard; sticky detail vs long scroll; unique `--user-data-dir` per headless capture. Decisions: live debounced search with URL sync; side-by-side detail; audience-named headings.
+- Next session should start with: M7 prod Dockerfiles for both Django services, `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`.

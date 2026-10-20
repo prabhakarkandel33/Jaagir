@@ -132,19 +132,36 @@ export function statusTone(status: string): 'ok' | 'warn' | 'danger' | 'muted' |
   }
 }
 
-export function ErrorNote({ error }: { error: unknown }) {
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'Draft',
+  PUBLISHED: 'Live',
+  CLOSED: 'Closed',
+  SUBMITTED: 'Submitted',
+  IN_REVIEW: 'In review',
+  SHORTLISTED: 'Shortlisted',
+  REJECTED: 'Not selected',
+  ACCEPTED: 'Accepted',
+};
+
+export function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
+export function ErrorNote({ error, plain = false }: { error: unknown; plain?: boolean }) {
   if (!error) return null;
   const code = isApiError(error) ? error.code : null;
   const status = isApiError(error) ? error.status : null;
   const details = isApiError(error) ? error.details : null;
   return (
     <div className="note note--error" role="alert">
-      <div className="note__head">
-        <strong>{code ?? 'Error'}</strong>
-        {status ? <span className="note__meta">HTTP {status}</span> : null}
-      </div>
+      {plain ? null : (
+        <div className="note__head">
+          <strong>{code ?? 'Error'}</strong>
+          {status ? <span className="note__meta">HTTP {status}</span> : null}
+        </div>
+      )}
       <p>{errorText(error)}</p>
-      {details ? <pre className="json json--small">{JSON.stringify(details, null, 2)}</pre> : null}
+      {!plain && details ? <pre className="json json--small">{JSON.stringify(details, null, 2)}</pre> : null}
     </div>
   );
 }

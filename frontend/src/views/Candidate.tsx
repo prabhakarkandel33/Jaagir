@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Empty, ErrorNote, Field, Panel, statusTone } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Empty,
+  ErrorNote,
+  Field,
+  statusLabel,
+  statusTone,
+} from '../components/ui';
 import { api } from '../lib/api';
 import { formatDate, joinList, splitList } from '../lib/format';
 import type { Application, Candidate as CandidateProfile, Page } from '../lib/types';
@@ -10,9 +18,13 @@ export type CandidateSession = { token: string; profile: CandidateProfile };
 export function Candidate({
   session,
   onSession,
+  onExplore,
+  onEmployer,
 }: {
   session: CandidateSession | null;
   onSession: (session: CandidateSession | null) => void;
+  onExplore: () => void;
+  onEmployer: () => void;
 }) {
   const token = session?.token ?? null;
 
@@ -106,7 +118,7 @@ export function Candidate({
               phone: credentials.phone,
             });
       const data = response.candidate;
-      if (!data) throw new Error('The auth response did not include the candidate profile.');
+      if (!data) throw new Error('The sign-in response did not include your profile.');
       onSession({ token: response.access, profile: data });
       setCredentials({ email: '', password: '', full_name: '', phone: '' });
     } catch (cause) {
@@ -155,26 +167,32 @@ export function Candidate({
 
   if (!session || !token) {
     return (
-      <div className="split">
-        <Panel
-          title={mode === 'login' ? 'Candidate sign in' : 'Create a candidate account'}
-          service="candidate"
-          subtitle="Tokens are issued by the candidate service and verified locally."
-          actions={
-            <div className="segmented" role="group" aria-label="Auth mode">
-              <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
-                Sign in
-              </button>
-              <button
-                type="button"
-                aria-pressed={mode === 'register'}
-                onClick={() => setMode('register')}
-              >
-                Register
-              </button>
-            </div>
-          }
-        >
+      <div className="authsplit">
+        <section className="authcard">
+          <div className="authcard__head">
+            <h1 className="authcard__title">
+              {mode === 'login' ? 'Job seeker sign in' : 'Create a job seeker account'}
+            </h1>
+            <p className="authcard__sub">
+              {mode === 'login'
+                ? 'Sign in to apply for roles and track your applications.'
+                : 'One account for applying, saving your profile, and following every role.'}
+            </p>
+          </div>
+
+          <div className="segmented" role="group" aria-label="Sign in or create an account">
+            <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
+              Sign in
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === 'register'}
+              onClick={() => setMode('register')}
+            >
+              Create account
+            </button>
+          </div>
+
           <form className="grid" onSubmit={submitAuth}>
             <Field label="Email" wide>
               <input
@@ -201,7 +219,7 @@ export function Candidate({
             </Field>
             {mode === 'register' ? (
               <>
-                <Field label="Full name" wide>
+                <Field label="Your name" wide>
                   <input
                     className="input"
                     required
@@ -228,17 +246,26 @@ export function Candidate({
               </Button>
             </div>
           </form>
-          <ErrorNote error={authError} />
-        </Panel>
+          <ErrorNote error={authError} plain />
+        </section>
 
-        <Panel title="What happens here" service="candidate">
-          <ol className="steps">
-            <li>Search reads the local replica, so it survives a Kafka outage.</li>
-            <li>Apply writes one row; a unique index blocks a second application.</li>
-            <li>History is paged, newest first.</li>
-            <li>Each application stores the job title and company as a snapshot.</li>
-          </ol>
-        </Panel>
+        <aside className="authside">
+          <h2 className="authside__title">A profile that works for you</h2>
+          <ul className="authside__list">
+            <li>Keep your skills, headline, and resume in one place.</li>
+            <li>Apply in a click and follow every application.</li>
+            <li>Come back any time to see what moved.</li>
+          </ul>
+          <button type="button" className="link" onClick={onExplore}>
+            Browse open roles first
+          </button>
+          <p className="authside__switch">
+            Hiring instead?{' '}
+            <a href="/employers" onClick={(event) => { event.preventDefault(); onEmployer(); }}>
+              Go to the employer sign in
+            </a>
+          </p>
+        </aside>
       </div>
     );
   }
@@ -248,202 +275,220 @@ export function Candidate({
     : 1;
 
   return (
-    <div className="stack">
-      <Panel
-        title="My profile"
-        service="candidate"
-        subtitle={profile?.email}
-        actions={
-          <div className="row">
-            <Button variant="ghost" onClick={() => void loadProfile(token)}>
-              Reload
-            </Button>
-            <Button variant="quiet" onClick={() => onSession(null)}>
-              Sign out
-            </Button>
-          </div>
-        }
-      >
-        <form className="grid" onSubmit={saveProfile}>
-          <Field label="Full name" wide>
-            <input
-              className="input"
-              required
-              value={form.full_name}
-              onChange={(event) => setForm({ ...form, full_name: event.target.value })}
-            />
-          </Field>
-          <Field label="Headline">
-            <input
-              className="input"
-              maxLength={200}
-              value={form.headline}
-              onChange={(event) => setForm({ ...form, headline: event.target.value })}
-              placeholder="Backend engineer"
-            />
-          </Field>
-          <Field label="Location">
-            <input
-              className="input"
-              maxLength={200}
-              value={form.location}
-              onChange={(event) => setForm({ ...form, location: event.target.value })}
-              placeholder="Berlin"
-            />
-          </Field>
-          <Field label="Phone">
-            <input
-              className="input"
-              maxLength={50}
-              value={form.phone}
-              onChange={(event) => setForm({ ...form, phone: event.target.value })}
-            />
-          </Field>
-          <Field label="Resume URL">
-            <input
-              className="input"
-              maxLength={500}
-              value={form.resume_url}
-              onChange={(event) => setForm({ ...form, resume_url: event.target.value })}
-              placeholder="https://…"
-            />
-          </Field>
-          <Field label="Skills" hint="Comma separated." wide>
-            <input
-              className="input"
-              value={form.skills}
-              onChange={(event) => setForm({ ...form, skills: event.target.value })}
-            />
-          </Field>
-          <Field label="Summary" wide>
-            <textarea
-              className="input input--area"
-              rows={4}
-              value={form.summary}
-              onChange={(event) => setForm({ ...form, summary: event.target.value })}
-            />
-          </Field>
-          <div className="grid__submit">
-            <Button type="submit" busy={profileBusy}>
-              Save profile
-            </Button>
-          </div>
-        </form>
-        <ErrorNote error={profileError} />
-        {profileNote ? <p className="note note--ok">{profileNote}</p> : null}
-      </Panel>
-
-      <Panel
-        title="My applications"
-        service="candidate"
-        subtitle="Newest first. Select a row to read the full record."
-        actions={
-          <div className="row">
-            <span className="mono meta">{applications?.total ?? 0} total</span>
-            <Button variant="ghost" onClick={() => void loadApplications(token, appsPage)}>
-              Reload
-            </Button>
-          </div>
-        }
-      >
-        <ErrorNote error={appsError} />
-        {appsLoading && !applications ? <p className="meta">Loading…</p> : null}
-        {applications && applications.items.length === 0 ? (
-          <Empty>No applications yet. Find a job in Discover and apply.</Empty>
-        ) : null}
-        {applications && applications.items.length > 0 ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>Company</th>
-                <th>Status</th>
-                <th>Applied</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {applications.items.map((application) => (
-                <tr key={application.id} className={detail?.id === application.id ? 'row--active' : undefined}>
-                  <td>{application.job_title_snapshot}</td>
-                  <td>{application.company_snapshot}</td>
-                  <td>
-                    <Badge tone={statusTone(application.status)}>{application.status}</Badge>
-                  </td>
-                  <td className="mono">{formatDate(application.applied_at)}</td>
-                  <td>
-                    <Button variant="quiet" onClick={() => void openApplication(application.id)}>
-                      Open
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : null}
-        <div className="pager">
-          <Button
-            variant="ghost"
-            disabled={appsPage <= 1 || appsLoading}
-            onClick={() => {
-              const next = appsPage - 1;
-              setAppsPage(next);
-              void loadApplications(token, next);
-            }}
-          >
-            Previous
+    <div className="portal">
+      <header className="portal__head">
+        <div>
+          <h1 className="portal__title">Hello, {profile?.full_name ?? 'there'}</h1>
+          <p className="portal__sub">
+            {profile?.headline || 'Tell employers what you do best.'}
+            {profile?.location ? ` · ${profile.location}` : ''}
+          </p>
+        </div>
+        <div className="row">
+          <Button variant="ghost" onClick={onExplore}>
+            Find roles
           </Button>
-          <span className="mono">
-            {appsPage} / {totalPages}
-          </span>
-          <Button
-            variant="ghost"
-            disabled={appsLoading || appsPage >= totalPages}
-            onClick={() => {
-              const next = appsPage + 1;
-              setAppsPage(next);
-              void loadApplications(token, next);
-            }}
-          >
-            Next
+          <Button variant="quiet" onClick={() => onSession(null)}>
+            Sign out
           </Button>
         </div>
-      </Panel>
+      </header>
+
+      <section className="panel">
+        <header className="panel__head">
+          <div className="panel__intro">
+            <h2 className="panel__title">Your profile</h2>
+            <p className="panel__subtitle">{profile?.email}</p>
+          </div>
+        </header>
+        <div className="panel__body">
+          <form className="grid" onSubmit={saveProfile}>
+            <Field label="Full name" wide>
+              <input
+                className="input"
+                required
+                value={form.full_name}
+                onChange={(event) => setForm({ ...form, full_name: event.target.value })}
+              />
+            </Field>
+            <Field label="Headline">
+              <input
+                className="input"
+                maxLength={200}
+                value={form.headline}
+                onChange={(event) => setForm({ ...form, headline: event.target.value })}
+                placeholder="Backend engineer"
+              />
+            </Field>
+            <Field label="Where you live">
+              <input
+                className="input"
+                maxLength={200}
+                value={form.location}
+                onChange={(event) => setForm({ ...form, location: event.target.value })}
+                placeholder="Berlin"
+              />
+            </Field>
+            <Field label="Phone">
+              <input
+                className="input"
+                maxLength={50}
+                value={form.phone}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              />
+            </Field>
+            <Field label="Resume link" hint="A link to your resume or portfolio.">
+              <input
+                className="input"
+                maxLength={500}
+                value={form.resume_url}
+                onChange={(event) => setForm({ ...form, resume_url: event.target.value })}
+                placeholder="https://…"
+              />
+            </Field>
+            <Field label="Skills" hint="Separate with commas." wide>
+              <input
+                className="input"
+                value={form.skills}
+                onChange={(event) => setForm({ ...form, skills: event.target.value })}
+              />
+            </Field>
+            <Field label="About you" wide>
+              <textarea
+                className="input input--area"
+                rows={4}
+                value={form.summary}
+                onChange={(event) => setForm({ ...form, summary: event.target.value })}
+                placeholder="A short introduction employers will read."
+              />
+            </Field>
+            <div className="grid__submit">
+              <Button type="submit" busy={profileBusy}>
+                Save profile
+              </Button>
+            </div>
+          </form>
+          <ErrorNote error={profileError} plain />
+          {profileNote ? <p className="note note--ok">{profileNote}</p> : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <header className="panel__head">
+          <div className="panel__intro">
+            <h2 className="panel__title">Your applications</h2>
+            <p className="panel__subtitle">Newest first. Open one to read the full record.</p>
+          </div>
+          <div className="panel__actions">
+            <Button variant="ghost" onClick={() => void loadApplications(token, appsPage)}>
+              Refresh
+            </Button>
+          </div>
+        </header>
+        <div className="panel__body">
+          <ErrorNote error={appsError} plain />
+          {appsLoading && !applications ? <p className="meta">Loading…</p> : null}
+          {applications && applications.items.length === 0 ? (
+            <Empty>
+              No applications yet.{' '}
+              <button type="button" className="link" onClick={onExplore}>
+                Find a role
+              </button>{' '}
+              and apply.
+            </Empty>
+          ) : null}
+          {applications && applications.items.length > 0 ? (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Company</th>
+                  <th>Status</th>
+                  <th>Applied</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {applications.items.map((application) => (
+                  <tr
+                    key={application.id}
+                    className={detail?.id === application.id ? 'row--active' : undefined}
+                  >
+                    <td>{application.job_title_snapshot}</td>
+                    <td>{application.company_snapshot}</td>
+                    <td>
+                      <Badge tone={statusTone(application.status)}>
+                        {statusLabel(application.status)}
+                      </Badge>
+                    </td>
+                    <td>{formatDate(application.applied_at)}</td>
+                    <td>
+                      <Button variant="quiet" onClick={() => void openApplication(application.id)}>
+                        Open
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          <div className="pager">
+            <Button
+              variant="ghost"
+              disabled={appsPage <= 1 || appsLoading}
+              onClick={() => {
+                const next = appsPage - 1;
+                setAppsPage(next);
+                void loadApplications(token, next);
+              }}
+            >
+              Previous
+            </Button>
+            <span className="pager__count">
+              Page {appsPage} of {totalPages}
+            </span>
+            <Button
+              variant="ghost"
+              disabled={appsLoading || appsPage >= totalPages}
+              onClick={() => {
+                const next = appsPage + 1;
+                setAppsPage(next);
+                void loadApplications(token, next);
+              }}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </section>
 
       {detail || detailError ? (
-        <Panel title="Application detail" service="candidate">
-          <ErrorNote error={detailError} />
-          {detail ? (
-            <>
-              <dl className="facts">
-                <div>
-                  <dt>Application id</dt>
-                  <dd className="mono">{detail.id}</dd>
-                </div>
-                <div>
-                  <dt>Job id</dt>
-                  <dd className="mono">{detail.job_id}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <Badge tone={statusTone(detail.status)}>{detail.status}</Badge>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Applied</dt>
-                  <dd>{formatDate(detail.applied_at)}</dd>
-                </div>
-                <div>
-                  <dt>Status updated</dt>
-                  <dd>{formatDate(detail.status_updated_at)}</dd>
-                </div>
-              </dl>
-              <h3 className="apply__title">Cover letter</h3>
-              <p className="prose">{detail.cover_letter || 'No cover letter.'}</p>
-            </>
-          ) : null}
-        </Panel>
+        <section className="panel">
+          <header className="panel__head">
+            <div className="panel__intro">
+              <h2 className="panel__title">
+                {detail ? detail.job_title_snapshot : 'Application'}
+              </h2>
+              <p className="panel__subtitle">
+                {detail ? `${detail.company_snapshot} · applied ${formatDate(detail.applied_at)}` : null}
+              </p>
+            </div>
+            {detail ? (
+              <div className="panel__actions">
+                <Badge tone={statusTone(detail.status)}>{statusLabel(detail.status)}</Badge>
+              </div>
+            ) : null}
+          </header>
+          <div className="panel__body">
+            <ErrorNote error={detailError} plain />
+            {detail ? (
+              <>
+                <h3 className="apply__title">Your cover letter</h3>
+                <p className="prose">{detail.cover_letter || 'No cover letter.'}</p>
+              </>
+            ) : null}
+          </div>
+        </section>
       ) : null}
     </div>
   );
