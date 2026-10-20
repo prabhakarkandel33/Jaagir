@@ -179,3 +179,18 @@ services:
         condition: service_completed_successfully
       job-web:
         condition: service_started
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        VITE_JOB_SERVICE_URL: ${FRONTEND_JOB_URL:-http://localhost:3001}
+        VITE_CANDIDATE_SERVICE_URL: ${FRONTEND_CANDIDATE_URL:-http://localhost:3002}
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-frontend
+    ports:
+      - "${FRONTEND_PORT:-5174}:8080"
+    depends_on:
+      job-web:
+        condition: service_healthy
+      candidate-web:
+        condition: service_healthy

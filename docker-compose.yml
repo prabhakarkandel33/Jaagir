@@ -1,0 +1,17 @@
+# One-command local stack. Everything runs in containers: both databases,
+# Kafka, both Django services, the relay, the consumer, the reconciler, and the
+# built frontend. No Node, no `npm run dev`, no host processes.
+#
+#   cp backend/services/job-service/.env.example      backend/services/job-service/.env
+#   cp backend/services/candidate-service/.env.example backend/services/candidate-service/.env
+#   docker compose build
+#   docker compose up -d
+#
+# Then open http://localhost:5174 (UI), :3001 and :3002 (APIs), :3001/docs.
+#
+# The included file is the real definition; it also includes
+# deploy/docker-compose.dev.yml for kafka and the two databases. Compose
+# resolves paths relative to the file that declares them.
+
+include:
+  - deploy/docker-compose.dev-full.yml

@@ -10,11 +10,12 @@ Living project memory and **the work queue**. Every session reads this first and
 
 ```
 Current milestone : M7
-State             : NOT STARTED (M6 complete)
-Last session      : S8 (2026-10-20)
-Next action       : M7 Containerization + CI/CD (prod Dockerfiles, prod compose, Caddy, deploy scripts, full ci.yml)
+State             : IN PROGRESS (frontend image + dev-full frontend service done; prod compose, Caddy, deploy scripts, CI pending)
+Last session      : S9 (2026-10-20)
+Next action       : M7: prod Dockerfiles for both Django services, deploy/docker-compose.prod.yml, deploy/Caddyfile, deploy/scripts/*, ci.yml + deploy.yml, docs/deployment.md
 Last green verify : 2026-10-20 (ruff clean, format 141 files, mypy x3 Success, pytest 11 + 80 + 57 = 148)
 Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
+Frontend          : design pass done + prod image builds; containerized on :5174 (nginx-unprivileged), `npm run build` clean
 
 Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [ ] M7  [ ] M8  [ ] M9`
 
@@ -140,6 +141,8 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
   - [2026-10-20] Run 1 `5/5 in 110.3s`, run 2 `5/5 in 110.3s`, run 3 `5/5 in 101.8s` (fresh stack each time). A fourth run after BOM/format cleanup: `5/5 in 240.5s` (slower host under load, no functional change). Flake root causes are in Gotchas (docker-exec Kafka helper hang; unbounded DLQ replay loop).
 
 ### M7: Containerization and CI/CD
+- [x] Frontend image: `frontend/Dockerfile` (multi-stage `node:22-slim` build -> `nginxinc/nginx-unprivileged:1.27-alpine`, non-root uid 101, port 8080, `/healthz`, `HEALTHCHECK`), `frontend/nginx.conf` (SPA fallback, immutable `/assets` cache, security headers), `frontend/.dockerignore`, and a `frontend` service in `deploy/docker-compose.dev-full.yml` (`:5174`, waits for both web healthchecks).
+  - [2026-10-20, S9] `docker compose -f deploy/docker-compose.dev-full.yml up -d --build frontend` -> container healthy; `curl.exe http://localhost:5174/healthz` -> 200 `ok`; `/` and `/ops` -> 200 (SPA fallback); screenshot of `:5174` matches the dev design and shows live search results. API bases are Vite build args (`VITE_JOB_SERVICE_URL`, `VITE_CANDIDATE_SERVICE_URL`), so changing them needs an image rebuild.
 - [ ] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `node:22-slim`, non-root, prod deps only, `HEALTHCHECK` via node fetch, `.dockerignore`).
 - [ ] `deploy/docker-compose.prod.yml`: caddy, kafka (heap capped, volume), job-db, candidate-db (volumes, healthchecks), job-service, candidate-service, `*-migrate` one-shot services, log rotation, `mem_limit`s per §11 budget, only Caddy publishes ports, private network.
 - [ ] `deploy/Caddyfile`: both domains from env, `/internal/*` -> 404, security headers, `reverse_proxy`; support `tls internal` / staging ACME for testing.
@@ -250,6 +253,13 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-20, M6] PowerShell `Set-Content -Encoding UTF8` (5.1) writes a BOM. Symptoms: `ruff format` panics with `Annotation range 0..1833 is beyond the end of buffer 1829`, and mypy reports `pyproject.toml: Invalid statement (at line 1, column 1)`. Fix: strip the first 3 bytes, or use the `write`/`edit` tools.
 - [2026-10-20, M6] An e2e helper that defaults every path to the candidate base sent `/internal/admin/outbox` to :13002 -> 404. Keep an explicit `base=` defaulting to the job service; pass `base=CAND_URL` only for candidate admin calls.
 - [2026-10-20, M6] Scenario A must restore Kafka in a `finally` block. Without it, a failed assertion left the broker stopped (`Exited (137)`) and every later scenario failed for an unrelated reason.
+- [2026-10-20, M7] Headless Edge on Windows clamps the CSS viewport to roughly 486-500 px: `--window-size=390` renders ~486 and crops the screenshot, so a "mobile" screenshot proves nothing. Measure `document.documentElement.scrollWidth` through a temporary injected script and `--dump-dom` instead.
+- [2026-10-20, M7] PowerShell 5.1 text round-trips damage non-ASCII content: `Set-Content -Encoding UTF8` adds a BOM (ruff then panics, see M6), and `Get-Content` without `-Encoding UTF8` shows UTF-8 as mojibake. Use the `write`/`edit` tools, or `[System.IO.File]::ReadAllText/WriteAllText` with `New-Object System.Text.UTF8Encoding($false)`.
+- [2026-10-20, M7] The `write` tool keeps an existing BOM when it rewrites a file (`frontend/index.html` stayed EF BB BF). Strip the first three bytes after a rewrite, or check with `[System.IO.File]::ReadAllBytes`.
+- [2026-10-20, M7] .NET file APIs in the shell resolve relative paths against the tool `workdir`, so `[IO.File]::ReadAllText('frontend/src/x')` with `workdir=frontend` looks in `frontend/frontend/`. Pass absolute paths.
+- [2026-10-20, M7] The frontend Devanagari stack (`"Noto Serif Devanagari", "Nirmala UI", Mangal, ...`) renders in Nirmala UI (sans) on this Windows box because only `Nirmala.ttc` is installed. The wordmark therefore looks different per OS; bundling one font file is the only way to keep it stable.
+- [2026-10-20, M7] `nginxinc/nginx-unprivileged` listens on **8080**, not 80, and runs as uid 101; publish `8080` and keep `USER 101`. Its Alpine base has BusyBox `wget`, so the `HEALTHCHECK` uses `wget`, not `curl`.
+- [2026-10-20, M7] Vite inlines `import.meta.env` at build time, so the frontend image is environment-specific: change `VITE_*` build args and rebuild. Do not expect runtime env vars in the container to change the API base.
 
 ---
 
@@ -292,6 +302,8 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-20, M6] The reconciler never deletes local rows. Full-mode "local row absent from source" is detected with a temp-table diff and logged as an anomaly. Why: a source bug or a partial page must not destroy replica data; convergence only ever adds or upgrades rows.
 - [2026-10-20, M6] Reconciliation runs in a management command (`run_reconciler`), not in the web process, and the e2e runner stops that container when it wants a deterministic reconcile. Why: a background full pass could repair the damage in the middle of a scenario and hide a defect.
 - [2026-10-20, M6] DLQ replay has ONE implementation (`apps/events/dlq.py`), exposed both as an HTTP admin endpoint and a management command; `scripts/replay_dlq.py` only calls the endpoint. Why: two Kafka clients in two languages would drift. Replay reads at most the DLQ size at call start, so an unfixable message cannot loop.
+- [2026-10-20, M7] Frontend visual pass (pre-M7, human-requested): kept the existing design world (petrol ink, warm paper, amber = Job API, teal = Candidate) and refined it instead of replacing it. Wordmark is Devanagari (`जागीर`) plus a small Latin line; the signal path (Job API -> Kafka -> Candidate) is the single authored motion moment; kickers/eyebrows and colored left bars were removed per the craft-floor rules. Why: the human asked for "good, not over the top". Rejected: a full redesign (the world was already distinctive), new UI dependencies (none added).
+- [2026-10-20, M7] The frontend container is a multi-stage build (`node:22-slim` -> `nginxinc/nginx-unprivileged`) because production needs only static files; Caddy still terminates TLS in front of it. Why: small runtime image, no Node process in production, non-root by default. Rejected: `vite preview` in the container (dev server in prod), a Node server process (extra surface, more RAM).
 
 ---
 
@@ -406,3 +418,15 @@ Template:
 - Not done / left half-way: nothing half-written. `scripts/demo_kafka_outage.sh` was not executed on this box (no bash; it only narrates and calls the same runner). M4 P1 `PATCH /recruiter/applications/:id/status` still open (non-P1 work for later).
 - Gotchas/decisions added: partial PUT body rejected (send full snapshot); `executemany` needs tuples; temp table (`PRESERVE ROWS` + explicit `DROP`) for the 100k-id diff; `docker exec` Kafka helpers hang on Windows -> use `confluent-kafka` from the host; replay feedback loop -> bound read set to the DLQ watermark snapshot; PowerShell BOM breaks ruff/mypy (`pyproject.toml` too); e2e `base=` routing; scenario A must restore Kafka in `finally`. Decisions: snapshot `after`+`updatedAfter`+`limit<=1000`; internal detail route closes the M4 P1 fallback; reconciler never deletes; reconcile runs as a management command; single DLQ replay implementation.
 - Next session should start with: M7 — prod Dockerfiles (multi-stage, repo-root context, non-root, healthcheck), `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/{bootstrap-vps,render-env,deploy,rollback,backup-db}.sh`, the full `ci.yml` (integration + migration check + image build + actionlint + e2e on main + secret scan + lockfile freshness) and `deploy.yml`, then `docs/deployment.md`.
+
+### Session 9: 2026-10-20: Frontend design pass + frontend container (pre-M7)
+- Did: full frontend quality pass (human-requested, "good, not over the top"). Rewrote `frontend/src/styles.css` with a token system, themed browser surfaces (selection, scrollbars, caret, focus ring), a 120-180 ms motion budget (`--ease-out: cubic-bezier(0.23,1,0.32,1)`), skeletons, and responsive rules at 1024/640 px. `App.tsx` now has the Devanagari wordmark (`जागीर`), a `SignalPath` component (Job API -> Kafka -> Candidate, driven by the `/readyz` checks) as the single authored motion moment, a readiness badge row, and hash routing (`#discover`/`#recruiter`/`#candidate`/`#ops`). `ui.tsx` `Panel` header lost the eyebrow/kicker and now shows the service badge inline; added `Skeleton`. Discover got loading skeletons and left-aligned submit; Ops probes show each base URL as `.probe` blocks. Then containerized the frontend: `frontend/Dockerfile` (multi-stage `node:22-slim` -> `nginxinc/nginx-unprivileged:1.27-alpine`, uid 101, port 8080, `/healthz`, `HEALTHCHECK`), `frontend/nginx.conf` (SPA fallback, immutable asset cache, security headers), `frontend/.dockerignore`, and a `frontend` service on `:5174` in `deploy/docker-compose.dev-full.yml` that waits for both web healthchecks.
+- Verified (commands + result):
+  - `npm run build` -> clean (`tsc -b` + Vite, 37 modules; `dist/assets/index-*.js` ~273 kB, gzip ~81 kB).
+  - `.opencode/skills/impeccable/scripts/impeccable.cmd detect --json frontend/src` -> `[]` (no craft-floor violations in the detector's ruleset).
+  - Headless Edge screenshots at 1440 px (Discover, Recruiter, Candidate, Ops) and 500 px (Discover, Ops): no horizontal overflow, no clipped controls, signal path readable.
+  - `./tasks.ps1 verify` -> ruff clean, format 141 files, mypy Success x3, pytest 11 + 80 + 57 = 148 passed (backend untouched).
+  - `docker compose -f deploy/docker-compose.dev-full.yml up -d --build frontend` -> container `(healthy)`; `GET :5174/healthz` -> 200 `ok`; `/` and `/ops` -> 200; screenshot of `:5174` shows the same design with live 100k-row search results (180,559 hits, 10 ms).
+- Not done / left half-way: no true 390 px check (headless Edge clamps the viewport to ~486 px; see Gotchas). No bundled Devanagari font yet, so the wordmark uses Nirmala UI on this box and another font on macOS/Linux. M7 prod compose/Caddy/deploy scripts/CI still open.
+- Gotchas/decisions added: Edge viewport clamp; PowerShell non-ASCII/BOM handling; write-tool BOM retention; `workdir`-relative .NET paths; Nirmala-only Devanagari rendering; nginx-unprivileged port 8080 + BusyBox wget; Vite build-time env. Decisions: refine (not replace) the design world; signal path as the only authored motion; static nginx image behind Caddy.
+- Next session should start with: M7 prod Dockerfiles for both Django services, `deploy/docker-compose.prod.yml`, `deploy/Caddyfile` (two domains, `/internal/*` -> 404), `deploy/scripts/*`, full `ci.yml` + `deploy.yml`, `docs/deployment.md`. Optional frontend follow-up: bundle a subsetted Devanagari font and serve same-origin API paths behind Caddy (removes CORS from prod).
