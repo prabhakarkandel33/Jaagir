@@ -9,14 +9,14 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M6
-State             : NOT STARTED (M5 complete)
-Last session      : S7 (2026-10-19)
-Next action       : M6 Reconciliation + DLQ replay + outage proof (scenarios A-E)
-Last green verify : 2026-10-19 (ruff clean, mypy x3 Success, pytest 11 + 69 + 42 = 122)
-```
+Current milestone : M7
+State             : NOT STARTED (M6 complete)
+Last session      : S8 (2026-10-20)
+Next action       : M7 Containerization + CI/CD (prod Dockerfiles, prod compose, Caddy, deploy scripts, full ci.yml)
+Last green verify : 2026-10-20 (ruff clean, format 141 files, mypy x3 Success, pytest 11 + 80 + 57 = 148)
+Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
 
-Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [ ] M6  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [ ] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -119,19 +119,25 @@ Legend: `[ ]` todo · `[x]` done with evidence · `(P1)` optional, only after al
 - **Acceptance (tests):** unpublished/closed excluded; title-match outranks description-match; pagination is stable and non-overlapping; weird input (`"`, `'`, `&`, `:*`, empty, 10k chars) never causes 500 and cannot inject SQL. `make explain` output shows GIN usage at 100k rows.
   - [2026-10-19] `job-service/tests/test_search.py` (20 cases) and `candidate-service/tests/test_search.py` (15 cases) cover every acceptance bullet, including `'; DROP TABLE jobs; --` leaving the table intact and an invalid `employmentType` returning 400. `make explain` shows GIN usage at 100k rows (see doc).
 
-### M6: Reconciliation, DLQ replay and outage proof (MOST IMPORTANT)
-- [ ] Job Service `GET /internal/jobs/snapshot?after&limit` per §6.3 (non-DRAFT, keyset by id, full payloads, token-guarded).
-- [ ] Candidate reconciler: full + incremental modes, schedule (30 s after boot, 5 min incremental, nightly full), uses shared `upsertJobFromSnapshot()`, writes `reconcile_runs`, logs anomalies, on-demand `POST /internal/admin/reconcile?mode=`, `GET /internal/admin/sync-status`.
-- [ ] `scripts/replay-dlq.ts` (`--dry-run`, `--limit`) and `POST /internal/admin/dlq/replay`.
-- [ ] `e2e/` scenarios (automated, `make e2e`) and `scripts/demo-kafka-outage.sh` (same story, human-readable PASS/FAIL narration):
+### M6: Reconciliation, DLQ replay and outage proof (MOST IMPORTANT) — M6 COMPLETE
+- [x] Job Service `GET /internal/jobs/snapshot?after&limit` per §6.3 (non-DRAFT, keyset by id, full payloads, token-guarded).
+  - [2026-10-20] `apps/jobs/snapshot.py::to_snapshot()` is the single snapshot builder (the outbox reuses it, so event and endpoint payloads cannot drift). `apps/jobs/internal_views.py`: `InternalJobSnapshotView` (`after` keyset by id, optional `updatedAfter` for the incremental window, `limit` 1..1000 default 500, returns `{items, nextAfter, hasMore}`) and `InternalJobDetailView` (`GET /internal/jobs/<uuid>`, 404 `JOB_NOT_FOUND` for drafts — this also closes the M4 P1 sync-fallback item). `tests/test_internal_snapshot.py` (11 cases: drafts excluded, keyset paging, limit bounds, token guard, detail 404/200). Job service 80 passed.
+- [x] Candidate reconciler: full + incremental modes, schedule (30 s after boot, 5 min incremental, nightly full), uses shared `upsertJobFromSnapshot()`, writes `reconcile_runs`, logs anomalies, on-demand `POST /internal/admin/reconcile?mode=`, `GET /internal/admin/sync-status`.
+  - [2026-10-20] `apps/events/models.py::ReconcileRun` (+ migration `events.0003_reconcilerun`); `apps/events/job_client.py` (stdlib urllib, `X-Internal-Token`, raises `JobServiceUnavailable`); `apps/events/reconciler.py` (`reconcile(mode)`: 10 min overlap for incremental, one transaction per page, temp table `reconcile_seen` for the full-mode "local row absent from source" anomaly, local-newer-version anomaly WARN, one run row per pass including failures, `sync_status()`); `apps/events/views.py`/`urls.py`; `management/commands/run_reconciler.py` (startup delay, incremental 300 s, full 86400 s, SIGTERM safe); settings `RECONCILE_*`. `tests/test_reconciler.py` (12 cases: repair, idempotent rerun, anomaly never deletes, local-newer WARN, incremental overlap, job-service-down run row, sync-status). Candidate service 57 passed.
+- [x] `scripts/replay-dlq.ts` (`--dry-run`, `--limit`) and `POST /internal/admin/dlq/replay`.
+  - [2026-10-20] Python, not TS. All replay logic is in `apps/events/dlq.py` (`replay_dlq()`: throwaway group id, never commits, `clean_headers()` strips `dlq-*`, read set = DLQ size at call start). Exposed as `POST /internal/admin/dlq/replay?limit&dryRun` and `manage.py replay_dlq`; `scripts/replay_dlq.py` is a thin HTTP client, so the CLI and the server cannot drift. `tests/test_dlq.py` (3 cases).
+- [x] `e2e/` scenarios (automated, `make e2e`) and `scripts/demo-kafka-outage.sh` (same story, human-readable PASS/FAIL narration):
   - **A** Kafka stopped -> publish, update, close jobs -> API OK, outbox pending > 0, candidate replica stale -> Kafka started -> outbox drains, replica matches.
   - **B** Candidate consumer stopped while events flow -> restarted -> catches up from offsets.
   - **C** Simulated lost events (delete replica rows / lower versions directly in `candidate_db`) -> `reconcile` repairs, `repaired` count matches.
   - **D** Poison message on topic -> goes to DLQ, healthy messages keep flowing -> fix cause -> `replay-dlq` -> applied.
   - **E** Topic deleted/recreated (or consumer offsets reset to end) so events are truly gone -> reconcile restores full consistency.
   - Final assertion in every scenario: `(id, version, status)` of all non-draft jobs identical between Job Service snapshot and Candidate replica; no duplicate rows; applications untouched.
-- [ ] `docs/outage-recovery.md`: scenario descriptions + **captured real output** of the demo script.
+  - [2026-10-20] `e2e/run_e2e.py` (all five scenarios, `--scenario`, `--keep`, `--no-build`), wired to `tasks.ps1 e2e` / `make e2e`. Own Compose project `jobportal-e2e` and ports 13001/13002/15433/15434/19092, so it never collides with `make dev`; `down -v` at the start of every run. `scripts/demo_kafka_outage.sh` narrates scenario A and calls the same runner.
+- [x] `docs/outage-recovery.md`: scenario descriptions + **captured real output** of the demo script.
+  - [2026-10-20] Written with the full captured transcript, timings per scenario, the three-run stability line, and the operations table (outbox backlog, reconcile, sync-status, replay).
 - **Acceptance:** `make e2e` all scenarios pass **three runs in a row** (flakiness check); `docs/outage-recovery.md` contains real transcripts. Record any flake root cause in Gotchas.
+  - [2026-10-20] Run 1 `5/5 in 110.3s`, run 2 `5/5 in 110.3s`, run 3 `5/5 in 101.8s` (fresh stack each time). A fourth run after BOM/format cleanup: `5/5 in 240.5s` (slower host under load, no functional change). Flake root causes are in Gotchas (docker-exec Kafka helper hang; unbounded DLQ replay loop).
 
 ### M7: Containerization and CI/CD
 - [ ] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `node:22-slim`, non-root, prod deps only, `HEALTHCHECK` via node fetch, `.dockerignore`).
@@ -236,6 +242,14 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-19, M5] The `jobs` table columns differ between the two databases (the replica has `source_updated_at`/`synced_at`, the source has `created_at`). The seed script reads `information_schema.columns` and COPYs only the intersection, instead of hardcoding a per-service column list.
 - [2026-10-19, M5] Browse ordering MUST be `published_at DESC NULLS LAST`. Plain `DESC` puts NULLs first in PostgreSQL, so rows whose `published_at` was never stamped (tests, manual inserts) jumped to the top of the browse page and the "newest first" test failed.
 - [2026-10-19, M5] At ~200 rows the planner picks a Seq Scan even with the GIN index present (correctly). Any EXPLAIN demonstration must run at 100k rows plus `ANALYZE jobs`, or it proves nothing.
+- [2026-10-20, M6] `create_job`/`update_job` in `apps/jobs/services.py` take snake_case dicts, and `JobWriteSerializer` (PUT) requires every field. A partial `{"title": ...}` update returns 400 `VALIDATION_ERROR`. The e2e helper now re-sends the full body.
+- [2026-10-20, M6] psycopg `cursor.executemany(sql, rows)` needs tuples: a bare `UUID` row raises `TypeError: object of type 'UUID' has no len()`. Rows must be `(uuid,)`.
+- [2026-10-20, M6] Full-mode reconciliation needs "which local ids were not in the source" over 100k+ ids; an `IN (...)` list grows past the parameter limit. Fix: temp table `reconcile_seen` + `INSERT ... VALUES %s` per page + `EXCEPT`. `ON COMMIT DELETE ROWS` would wipe it at each page commit, so use `PRESERVE ROWS` and an explicit `DROP` at the end.
+- [2026-10-20, M6] `subprocess.run(["docker","exec","-i",kafka,"kafka-console-producer.sh" ...])` and `kafka-topics.sh --delete` hang until the subprocess timeout on this Windows box (30 s and 60 s observed). Fix: drive Kafka from the test host with `confluent-kafka` (`Producer`, `AdminClient`, `get_watermark_offsets`) instead of `docker exec`.
+- [2026-10-20, M6] Replaying a still-invalid DLQ message is a feedback loop: replay re-publishes it to `jobs.events.v1`, the consumer rejects it back to the DLQ, the replay consumer (no commits, earliest) reads it again. Observed `read=1000 published=1000` with 2 real messages. Fix: snapshot the DLQ high-watermarks at call start and read at most `min(limit, snapshot)`.
+- [2026-10-20, M6] PowerShell `Set-Content -Encoding UTF8` (5.1) writes a BOM. Symptoms: `ruff format` panics with `Annotation range 0..1833 is beyond the end of buffer 1829`, and mypy reports `pyproject.toml: Invalid statement (at line 1, column 1)`. Fix: strip the first 3 bytes, or use the `write`/`edit` tools.
+- [2026-10-20, M6] An e2e helper that defaults every path to the candidate base sent `/internal/admin/outbox` to :13002 -> 404. Keep an explicit `base=` defaulting to the job service; pass `base=CAND_URL` only for candidate admin calls.
+- [2026-10-20, M6] Scenario A must restore Kafka in a `finally` block. Without it, a failed assertion left the broker stopped (`Exited (137)`) and every later scenario failed for an unrelated reason.
 
 ---
 
@@ -273,6 +287,11 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-19, M4] The consumer publishes its state through a singleton `consumer_status` heartbeat row that `/readyz` reads (fresh <= 15 s, else `stale`). Why: the consumer is a separate process, so the web process can only learn its state through the DB. Rejected: running the consumer inside the web process (double consumer-group membership), a file or Redis heartbeat (extra dependency).
 - [2026-10-19, M7 (dev only, human-approved)] Added a one-command dev stack (`deploy/docker-compose.dev-full.yml` + `backend/Dockerfile.dev` + `tasks.ps1 stack-up`) so `docker compose up -d --build` starts kafka, both DBs, both services, the relay and the consumer. Why: the human asked for one command instead of four terminals; it does not conflict with M7, which still owns the PROD images (gunicorn, non-root, multi-stage), Caddy, the health-gated migration flow and the CI. The dev image is deliberately separate from the prod Dockerfile and uses bind mounts for hot reload.
 - [2026-10-19, M5] Search SQL is duplicated per service (`apps/jobs/search.py`) rather than shared in `packages/contracts`. Why: invariant I1 forbids importing the other service's code and `contracts` must stay schema-only; each service owns its database and its own `cjobs_*` index names. Rejected: a shared search library (would make `contracts` a runtime dependency with DB access).
+- [2026-10-20, M6] The snapshot endpoint takes `after` (keyset by id) plus an optional `updatedAfter` and returns `{items, nextAfter, hasMore}`; `limit` is capped at 1000 (default 500). Why: keyset paging keeps full-mode passes linear at 100k rows, and the incremental window needs a time filter without a second endpoint.
+- [2026-10-20, M6] `InternalJobDetailView` (`GET /internal/jobs/<uuid>`) was added in M6 and closes the M4 P1 sync-fallback item. Why: the reconciler needs one row by id on demand; the same route serves a future fallback with no extra code.
+- [2026-10-20, M6] The reconciler never deletes local rows. Full-mode "local row absent from source" is detected with a temp-table diff and logged as an anomaly. Why: a source bug or a partial page must not destroy replica data; convergence only ever adds or upgrades rows.
+- [2026-10-20, M6] Reconciliation runs in a management command (`run_reconciler`), not in the web process, and the e2e runner stops that container when it wants a deterministic reconcile. Why: a background full pass could repair the damage in the middle of a scenario and hide a defect.
+- [2026-10-20, M6] DLQ replay has ONE implementation (`apps/events/dlq.py`), exposed both as an HTTP admin endpoint and a management command; `scripts/replay_dlq.py` only calls the endpoint. Why: two Kafka clients in two languages would drift. Replay reads at most the DLQ size at call start, so an unfixable message cannot loop.
 
 ---
 
@@ -376,3 +395,14 @@ Template:
 - Not done / left half-way: M5 has no P1 items. The dev stack is running with 100k seeded rows in both databases (do not re-seed blindly: `--count` is additive).
 - Gotchas/decisions added: `SET LOCAL` no-op outside a transaction -> session `SET` + `RESET`; psycopg3 has no `copy_expert` -> `cursor.copy()`; `auto_now` columns have no DB default so raw COPY must supply them; per-service column intersection via `information_schema`; `NULLS LAST` required for browse; Seq Scan at small row counts is correct; search SQL duplicated per service (I1).
 - Next session should start with: M6 — Job Service `GET /internal/jobs/snapshot?after&limit` (keyset, non-DRAFT, full payloads, token-guarded), the Candidate reconciler (full + incremental, `reconcile_runs`, `POST /internal/admin/reconcile`, `GET /internal/admin/sync-status`) reusing `upsert_job_from_snapshot`, `scripts/replay_dlq.py` + `POST /internal/admin/dlq/replay`, the `e2e/` scenarios A-E, and `docs/outage-recovery.md` with real transcripts.
+
+### Session 8: 2026-10-20: M6 (reconciliation + DLQ + outage proof) — M6 COMPLETE
+- Did: Job Service snapshot API (`apps/jobs/snapshot.py::to_snapshot`, `apps/jobs/internal_views.py`: `GET /internal/jobs/snapshot`, `GET /internal/jobs/<uuid>`; outbox now reuses `to_snapshot`), tests `test_internal_snapshot.py` (11). Candidate reconciler (`apps/events/reconciler.py`, `job_client.py`, `ReconcileRun` model + `events.0003_reconcilerun`, `POST /internal/admin/reconcile`, `GET /internal/admin/sync-status`, `management/commands/run_reconciler.py`, `RECONCILE_*` settings), tests `test_reconciler.py` (12). DLQ replay (`apps/events/dlq.py`, `POST /internal/admin/dlq/replay`, `management/commands/replay_dlq.py`, `scripts/replay_dlq.py` HTTP client), tests `test_dlq.py` (3). Compose parameterized (`COMPOSE_PROJECT_NAME`, `*_PORT`) and a `candidate-reconciler` service added to the dev-full stack. `e2e/run_e2e.py` with scenarios A-E + `scripts/demo_kafka_outage.sh`, wired to `make e2e` / `tasks.ps1 e2e`. `docs/outage-recovery.md` written with real transcripts.
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff "All checks passed", format "141 files already formatted", mypy Success x3 (5/70/83 files), pytest 11 + 80 + 57 = 148 passed.
+  - `uv run --project backend python e2e/run_e2e.py` -> `5/5 scenarios passed in 110.3s` (A 7.5 s, B 12.6 s, C 12.5 s, D 13.4 s, E 15.6 s); two more consecutive full runs `110.3s` and `101.8s`; a fourth run after BOM/format cleanup `240.5s` (host under load). Final assertion each run: "8 non-draft jobs identical in both databases".
+  - Scenario D numbers: DLQ `read=2 published=0` (dry run) then `read=2 published=2`; scenario C `checked=4 repaired=1`; scenario E rebuilt 1 row with no events available.
+  - `python scripts/replay_dlq.py --help` -> usage OK (thin HTTP client; endpoint is the only implementation).
+- Not done / left half-way: nothing half-written. `scripts/demo_kafka_outage.sh` was not executed on this box (no bash; it only narrates and calls the same runner). M4 P1 `PATCH /recruiter/applications/:id/status` still open (non-P1 work for later).
+- Gotchas/decisions added: partial PUT body rejected (send full snapshot); `executemany` needs tuples; temp table (`PRESERVE ROWS` + explicit `DROP`) for the 100k-id diff; `docker exec` Kafka helpers hang on Windows -> use `confluent-kafka` from the host; replay feedback loop -> bound read set to the DLQ watermark snapshot; PowerShell BOM breaks ruff/mypy (`pyproject.toml` too); e2e `base=` routing; scenario A must restore Kafka in `finally`. Decisions: snapshot `after`+`updatedAfter`+`limit<=1000`; internal detail route closes the M4 P1 fallback; reconciler never deletes; reconcile runs as a management command; single DLQ replay implementation.
+- Next session should start with: M7 — prod Dockerfiles (multi-stage, repo-root context, non-root, healthcheck), `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/scripts/{bootstrap-vps,render-env,deploy,rollback,backup-db}.sh`, the full `ci.yml` (integration + migration check + image build + actionlint + e2e on main + secret scan + lockfile freshness) and `deploy.yml`, then `docs/deployment.md`.

@@ -13,6 +13,7 @@ urlpatterns = [
     path("", include("apps.candidates.urls")),
     path("", include("apps.jobs.urls")),
     path("", include("apps.applications.urls")),
+    path("", include("apps.events.urls")),
     path("schema", SpectacularAPIView.as_view(), name="schema"),
     path("docs", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]

@@ -1,4 +1,4 @@
-# FULL local stack: infrastructure + both Django services + background workers.
+﻿# FULL local stack: infrastructure + both Django services + background workers.
 #
 #   docker compose -f deploy/docker-compose.dev-full.yml up --build
 #   docker compose -f deploy/docker-compose.dev-full.yml logs -f
@@ -18,7 +18,7 @@
 #
 # This file is for local development. Production images, Caddy, and the one-shot
 # migration flow behind a health gate are M7 (see ARCHITECTURE.md section 10).
-name: jobportal-dev
+name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}
 
 include:
   - docker-compose.dev.yml
@@ -34,7 +34,7 @@ x-service-env: &service-env
 services:
   job-migrate:
     <<: *job-image
-    container_name: jobportal-job-migrate
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-job-migrate
     working_dir: /app/services/job-service
     command: ["uv", "run", "python", "manage.py", "migrate", "--noinput"]
     environment:
@@ -49,7 +49,7 @@ services:
 
   candidate-migrate:
     <<: *job-image
-    container_name: jobportal-candidate-migrate
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-candidate-migrate
     working_dir: /app/services/candidate-service
     command: ["uv", "run", "python", "manage.py", "migrate", "--noinput"]
     environment:
@@ -64,11 +64,11 @@ services:
 
   job-web:
     <<: *job-image
-    container_name: jobportal-job-web
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-job-web
     working_dir: /app/services/job-service
     command: ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:3001"]
     ports:
-      - "3001:3001"
+      - "${JOB_SERVICE_PORT:-3001}:3001"
     environment:
       <<: *service-env
       DATABASE_URL: postgresql://jobportal:jobportal@job-db:5432/job_db
@@ -94,7 +94,7 @@ services:
 
   job-relay:
     <<: *job-image
-    container_name: jobportal-job-relay
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-job-relay
     working_dir: /app/services/job-service
     command: ["uv", "run", "python", "manage.py", "run_relay"]
     environment:
@@ -111,11 +111,11 @@ services:
 
   candidate-web:
     <<: *job-image
-    container_name: jobportal-candidate-web
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-candidate-web
     working_dir: /app/services/candidate-service
     command: ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:3002"]
     ports:
-      - "3002:3002"
+      - "${CANDIDATE_SERVICE_PORT:-3002}:3002"
     environment:
       <<: *service-env
       DATABASE_URL: postgresql://jobportal:jobportal@candidate-db:5432/candidate_db
@@ -142,7 +142,7 @@ services:
 
   candidate-consumer:
     <<: *job-image
-    container_name: jobportal-candidate-consumer
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-candidate-consumer
     working_dir: /app/services/candidate-service
     command: ["uv", "run", "python", "manage.py", "consume_events"]
     environment:
@@ -157,3 +157,25 @@ services:
     depends_on:
       candidate-migrate:
         condition: service_completed_successfully
+
+
+
+  candidate-reconciler:
+    <<: *job-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}-candidate-reconciler
+    working_dir: /app/services/candidate-service
+    command: ["uv", "run", "python", "manage.py", "run_reconciler"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://jobportal:jobportal@candidate-db:5432/candidate_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JOB_SERVICE_INTERNAL_URL: http://job-web:3001
+      RECONCILE_ENABLED: "true"
+    volumes:
+      - ../backend/services/candidate-service:/app/services/candidate-service
+      - ../backend/packages:/app/packages
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully
+      job-web:
+        condition: service_started

@@ -133,8 +133,12 @@ KAFKA_CONSUMER_ENABLED = env.kafka_consumer_enabled
 KAFKA_MESSAGE_TIMEOUT_MS = env.kafka_message_timeout_ms
 
 # Reconciliation (M6).
+RECONCILE_ENABLED = env.reconcile_enabled
 RECONCILE_INCREMENTAL_SECONDS = env.reconcile_incremental_seconds
+RECONCILE_FULL_SECONDS = env.reconcile_full_seconds
+RECONCILE_STARTUP_DELAY_SECONDS = env.reconcile_startup_delay_seconds
 RECONCILE_BATCH_LIMIT = env.reconcile_batch_limit
+RECONCILE_HTTP_TIMEOUT_SECONDS = env.reconcile_http_timeout_seconds
 
 # Internal endpoints + the Job Service internal URL (invariant I8).
 INTERNAL_TOKEN = env.internal_token

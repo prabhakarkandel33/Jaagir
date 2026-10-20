@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from django.urls import path
 
-from apps.jobs import views
+from apps.jobs import internal_views, views
 
 urlpatterns = [
+    path(
+        "internal/jobs/snapshot",
+        internal_views.InternalJobSnapshotView.as_view(),
+        name="internal-job-snapshot",
+    ),
+    path(
+        "internal/jobs/<uuid:job_id>",
+        internal_views.InternalJobDetailView.as_view(),
+        name="internal-job-detail",
+    ),
     path("recruiter/jobs", views.RecruiterJobListCreateView.as_view(), name="recruiter-jobs"),
     path(
         "recruiter/jobs/<uuid:job_id>",

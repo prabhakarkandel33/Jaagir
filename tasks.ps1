@@ -1,4 +1,4 @@
-# Job Portal - top-level commands for Windows (mirror of Makefile).
+﻿# Job Portal - top-level commands for Windows (mirror of Makefile).
 # Usage:  ./tasks.ps1 <target>   e.g.  ./tasks.ps1 infra-up
 #         ./tasks.ps1 seed -N 100000
 
@@ -100,7 +100,8 @@ switch ($Target) {
         Invoke-In '.' { uv run --project backend python scripts/explain_analyze.py --service job }
         Invoke-In '.' { uv run --project backend python scripts/explain_analyze.py --service candidate }
     }
-    'e2e' { Write-Output 'tasks.ps1 e2e: not implemented yet (M6)' }
+    'e2e' { Invoke-In '.' { uv run --project backend python e2e/run_e2e.py } }
     'prod-local' { Write-Output 'tasks.ps1 prod-local: not implemented yet (M7)' }
     default { Write-Output "Unknown target: $Target"; Write-Help; exit 1 }
 }
+

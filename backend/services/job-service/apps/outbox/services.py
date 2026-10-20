@@ -11,10 +11,9 @@ from uuid import uuid4
 
 from django.utils import timezone
 
+from apps.jobs.snapshot import to_snapshot
 from apps.outbox.models import OutboxEvent
-from contracts import EventEnvelope, JobSnapshot
-from contracts.events import EmploymentType
-from contracts.events import JobStatus as ContractJobStatus
+from contracts import EventEnvelope
 
 if TYPE_CHECKING:
     from apps.jobs.models import Job
@@ -23,21 +22,7 @@ if TYPE_CHECKING:
 
 def build_job_envelope(job: Job, event_type: JobEventType) -> EventEnvelope:
     """Wrap the FULL job snapshot in an envelope (ARCHITECTURE.md section 5)."""
-    snapshot = JobSnapshot(
-        id=job.id,
-        recruiter_id=job.recruiter_id,
-        title=job.title,
-        description=job.description,
-        company=job.company,
-        location=job.location,
-        employment_type=EmploymentType(job.employment_type),
-        skills=list(job.skills or []),
-        status=ContractJobStatus(job.status),
-        version=job.version,
-        published_at=job.published_at,
-        closed_at=job.closed_at,
-        updated_at=job.updated_at,
-    )
+    snapshot = to_snapshot(job)
     return EventEnvelope(
         event_id=uuid4(),
         event_type=event_type,

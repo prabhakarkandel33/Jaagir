@@ -59,8 +59,12 @@ class ServiceSettings(BaseSettings):
     kafka_message_timeout_ms: int = 5000
 
     # Reconciliation (M6).
+    reconcile_enabled: bool = True
     reconcile_incremental_seconds: int = 300
+    reconcile_full_seconds: int = 86400
+    reconcile_startup_delay_seconds: int = 30
     reconcile_batch_limit: int = 500
+    reconcile_http_timeout_seconds: float = 10.0
 
     # Internal endpoints + talking to the Job Service internally (I8).
     internal_token: str = ""

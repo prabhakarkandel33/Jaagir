@@ -44,3 +44,26 @@ class ConsumerStatus(models.Model):
 
     def __str__(self) -> str:
         return f"consumer={self.status} at {self.last_heartbeat_at}"
+
+
+class ReconcileRun(models.Model):
+    """One reconciliation pass (ARCHITECTURE.md section 6.3).
+
+    Written even when the pass fails, so ``/internal/admin/sync-status`` and
+    operators can see the last error and how long ago the replica converged.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    mode = models.CharField(max_length=16)
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    checked = models.IntegerField(default=0)
+    repaired = models.IntegerField(default=0)
+    error = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "reconcile_runs"
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return f"{self.mode} run {self.id}: checked={self.checked} repaired={self.repaired}"

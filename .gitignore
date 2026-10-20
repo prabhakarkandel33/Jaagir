@@ -42,3 +42,7 @@ Thumbs.db
 
 # Skills are provided by the environment, not vendored into the repo.
 .opencode/skills/
+
+# --- e2e run logs (local evidence, not committed) ---
+e2e/*.log
+e2e/__pycache__/

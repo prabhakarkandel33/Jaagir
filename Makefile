@@ -1,4 +1,4 @@
-# Job Portal - top-level commands (AGENTS.md section 5).
+﻿# Job Portal - top-level commands (AGENTS.md section 5).
 # On Windows use `tasks.ps1` instead: ./tasks.ps1 <target>
 
 BACKEND  := backend
@@ -93,7 +93,8 @@ explain:
 	uv run --project backend python scripts/explain_analyze.py --service candidate
 
 e2e:
-	@echo "make e2e: not implemented yet (M6)"
+	uv run --project backend python e2e/run_e2e.py
 
 prod-local:
 	@echo "make prod-local: not implemented yet (M7)"
+
