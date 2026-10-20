@@ -13,5 +13,7 @@
 # deploy/docker-compose.dev.yml for kafka and the two databases. Compose
 # resolves paths relative to the file that declares them.
 
+name: ${COMPOSE_PROJECT_NAME:-jobportal-dev}
+
 include:
   - deploy/docker-compose.dev-full.yml
