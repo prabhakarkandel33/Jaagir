@@ -90,9 +90,22 @@ export function PublicShell() {
         <p className="sitefoot__meta">
           {openRoles === null ? 'Roles updated every day' : `${openRoles.toLocaleString()} open roles`}
         </p>
-        <Link className="sitefoot__ops" to="/admin">
-          Ops console
-        </Link>
+        <div className="sitefoot__links">
+          <a
+            className="sitefoot__link"
+            href="https://github.com/prabhakarkandel33/Jaagir"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Contribute on GitHub
+            <span className="sitefoot__external" aria-hidden="true">
+              &nearr;
+            </span>
+          </a>
+          <Link className="sitefoot__link" to="/admin">
+            Ops console
+          </Link>
+        </div>
       </footer>
     </div>
   );

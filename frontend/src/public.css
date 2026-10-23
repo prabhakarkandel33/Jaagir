@@ -176,13 +176,35 @@ body[data-world="public"] :focus-visible {
   color: var(--faint);
 }
 
-.sitefoot__ops {
+.sitefoot__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.sitefoot__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--dim);
   text-decoration: none;
   border-bottom: 1px solid var(--line-strong);
+  transition: color 150ms ease;
 }
 
-.sitefoot__ops:hover {
+.sitefoot__link:hover {
+  color: var(--paper);
+}
+
+.sitefoot__external {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--faint);
+  transform: translateY(-1px);
+}
+
+.sitefoot__link:hover .sitefoot__external {
   color: var(--paper);
 }
 
