@@ -46,14 +46,26 @@ class ApiError(APIException):
         self.code = code
 
 
-def _message_from_detail(detail: Any) -> str:
-    if isinstance(detail, str):
-        return detail
-    if isinstance(detail, list) and detail:
-        return _message_from_detail(detail[0])
+def _field_label(name: str) -> str:
+    if name == "non_field_errors":
+        return "Request"
+    return name.replace("_", " ").capitalize()
+
+
+def _message_from_detail(detail: Any, field: str = "") -> str:
+    """Turn a DRF validation tree into a readable, field-aware message."""
     if isinstance(detail, dict):
+        parts: list[str] = []
         for key, value in detail.items():
-            return f"{key}: {_message_from_detail(value)}"
+            child = field or _field_label(str(key))
+            parts.append(_message_from_detail(value, child))
+        return " ".join(part for part in parts if part)
+    if isinstance(detail, list):
+        return " ".join(_message_from_detail(item, field) for item in detail)
+    if isinstance(detail, str):
+        if field and detail.lower() == "this field is required.":
+            return f"{field} is required."
+        return f"{field}: {detail}" if field else detail
     return "Invalid request."
 
 
@@ -71,7 +83,7 @@ def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response |
         details = exc.error_details
     elif isinstance(exc, ValidationError):
         code = "VALIDATION_ERROR"
-        message = "Request validation failed."
+        message = _message_from_detail(exc.detail) or "Request validation failed."
         details = exc.detail
     else:
         code = _STATUS_TO_CODE.get(http_status, "ERROR")

@@ -374,6 +374,8 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-23, M7] A top-level Caddy `path /api/job/internal/*` matcher does not exist after `handle_path` strips the prefix. Fix: block `/internal`, `/internal/*`, `/api/job/internal/*`, and `/api/candidate/internal/*` at the top, and add a stripped-path `/internal` guard inside each API block. Bare `/api/job` and `/api/candidate` return 404.
 - [2026-10-23, M7] Testing `FORCE_SCRIPT_NAME` with `override_settings` and the Django test client does not prefix `reverse()` URLs in that context. Do not treat the unit test result as the production answer; verify the live Caddy path instead.
 - [2026-10-23, M7] `verify` needs the dev Postgres containers on host ports 5433/5434. After work on the prod stack those containers can be stopped while still listed, and every DB test then waits on a connection timeout (the suite ran 9 minutes and errored 86 tests). Fix: run `./tasks.ps1 infra-up` and confirm `Get-NetTCPConnection -LocalPort 5433 -State Listen` before blaming the code.
+- [2026-10-23, M7] Posting a role with `Publish now` bypassed native validation: the button was `type="button"`, so an incomplete form reached the API. The API returned 400 with the generic message `Request validation failed.`, and `ErrorNote plain` hid the field details. Fix: call `form.reportValidity()` before both create paths, mark `Location` required, build the API message from the DRF field tree, and render those field lines in plain error notes.
+- [2026-10-23, M7] The browser password-reveal control hides the password again on blur, which made the sign-in/sign-up eye feel broken. Fix: use the shared `PasswordInput` with its own persistent `visible` state and hide Edge's native `::-ms-reveal` control.
 
 ---
 
@@ -659,3 +661,10 @@ Template:
 - Not done / left half-way: no commit yet at session end (committed immediately after this entry). `deploy.yml` still human-owned; `deploy.sh` rollback still unproven; e2e not re-run because only prod routing changed.
 - Gotchas/decisions added: `handle_path` + `FORCE_SCRIPT_NAME` must agree; top-level internal matchers do not match stripped paths; `override_settings(FORCE_SCRIPT_NAME)` does not emulate the live script prefix. Decision: one host with path prefixes supersedes the three-domain layout.
 - Next session should start with: review the pushed diff, add `deploy.yml`, prove rollback on Linux. M8 waits on VPS/DNS/secrets.
+
+### Session 18: 2026-10-23: form validation and password reveal
+- Did: `Publish now` now calls `reportValidity()`; `Location` is required. Both exception handlers build a field-aware validation message. `ErrorNote plain` shows field lines. Added `PasswordInput` with persistent visibility and hid Edge's native reveal; used on recruiter/candidate sign-in and admin login.
+- Verified (commands + result): `./tasks.ps1 verify` -> ruff clean, 150 files formatted, mypy Success x3, pytest 11 + 90 + 79 = 180. Prod API 400 message lists all missing fields. Playwright on prod and dev: eye stays revealed after blur; incomplete form focuses Location; whitespace title shows the field error; corrected form publishes.
+- Not done / left half-way: no commit yet; commit follows this entry.
+- Gotchas/decisions added: publish bypass, generic validation envelope, native password reveal reset.
+- Next session should start with: review and push; `deploy.yml` and rollback proof remain human-owned.

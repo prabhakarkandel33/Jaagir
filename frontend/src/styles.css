@@ -741,6 +741,43 @@ a {
   opacity: 1;
 }
 
+.password-input {
+  position: relative;
+  display: block;
+}
+
+.password-input .input {
+  padding-right: 42px;
+}
+
+.password-input__toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--dim);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  place-items: center;
+  transform: translateY(-50%);
+}
+
+.password-input__toggle:hover,
+.password-input__toggle:focus-visible {
+  color: var(--paper);
+  background: var(--ink-3);
+}
+
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 .input--area {
   resize: vertical;
   line-height: 1.55;
@@ -855,6 +892,15 @@ select.input {
 
 .note__meta {
   color: var(--dim);
+}
+
+.note__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.note__list li + li {
+  margin-top: 3px;
 }
 
 .empty {

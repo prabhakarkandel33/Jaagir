@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { PageHead } from '../../components/portal';
@@ -23,8 +23,14 @@ export function PostRole() {
   });
   const [busy, setBusy] = useState<'draft' | 'publish' | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  function checksOut(): boolean {
+    return formRef.current?.reportValidity() ?? true;
+  }
 
   async function create(publish: boolean) {
+    if (!checksOut()) return;
     setBusy(publish ? 'publish' : 'draft');
     setError(null);
     const payload: JobWrite = {
@@ -58,6 +64,7 @@ export function PostRole() {
       <section className="pcard pcard--narrow">
         <div className="pcard__body">
           <form
+            ref={formRef}
             className="grid"
             onSubmit={(event) => {
               event.preventDefault();
@@ -86,6 +93,7 @@ export function PostRole() {
             <Field label="Location">
               <input
                 className="input"
+                required
                 maxLength={200}
                 placeholder="Remote, Berlin…"
                 value={form.location}

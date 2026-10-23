@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, ErrorNote, Field } from '../components/ui';
+import { Badge, Button, ErrorNote, Field, PasswordInput } from '../components/ui';
 import { SignalPath, combine, fromCheck, fromReady, tone } from '../components/Signal';
 import { adminLogin, api } from '../lib/api';
 import type { Readyz } from '../lib/types';
@@ -122,13 +122,10 @@ export function Admin({
                     />
                   </Field>
                   <Field label="Password" wide>
-                    <input
-                      className="input"
-                      type="password"
+                    <PasswordInput
                       autoComplete="current-password"
-                      required
                       value={password}
-                      onChange={(event) => setPassword(event.target.value)}
+                      onChange={setPassword}
                     />
                   </Field>
                   <div className="grid__submit">

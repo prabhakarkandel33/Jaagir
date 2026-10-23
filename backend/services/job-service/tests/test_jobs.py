@@ -60,6 +60,23 @@ def test_create_requires_recruiter_role() -> None:
     assert APIClient().post("/recruiter/jobs", job_payload(), format="json").status_code == 401
 
 
+def test_create_missing_fields_names_every_field() -> None:
+    response = auth_client(make_recruiter()).post("/recruiter/jobs", {"skills": []}, format="json")
+
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    for field in ("Title", "Description", "Company", "Location", "Employment type"):
+        assert f"{field} is required." in error["message"]
+    assert set(error["details"]) == {
+        "title",
+        "description",
+        "company",
+        "location",
+        "employment_type",
+    }
+
+
 def test_publish_transitions_and_emits_event() -> None:
     client = auth_client(make_recruiter())
     job_id = create_job(client)["id"]

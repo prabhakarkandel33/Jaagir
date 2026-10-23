@@ -32,6 +32,21 @@ def test_register_returns_token_with_role() -> None:
     assert payload["role"] == "candidate"
 
 
+def test_register_validation_message_names_missing_fields() -> None:
+    response = APIClient().post(
+        "/auth/candidates/register",
+        {"password": "correct horse battery"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert "Email is required." in error["message"]
+    assert "Full name is required." in error["message"]
+    assert "password" not in error["details"]
+
+
 def test_duplicate_register_is_409() -> None:
     Candidate.objects.create_user(email="dup@example.com", password="correct horse battery")
     client = APIClient()

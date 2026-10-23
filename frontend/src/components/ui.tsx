@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { isApiError } from '../lib/api';
@@ -100,6 +100,66 @@ export function Field({
   );
 }
 
+export function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  minLength,
+  required = true,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  minLength?: number;
+  required?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="password-input">
+      <input
+        className="input"
+        type={visible ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        required={required}
+        minLength={minLength}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <button
+        type="button"
+        className="password-input__toggle"
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        aria-pressed={visible}
+        onClick={() => setVisible((current) => !current)}
+      >
+        {visible ? (
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <path
+              d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 5.2A10.6 10.6 0 0 1 12 5c5.5 0 9 7 9 7a17 17 0 0 1-2.2 3.1M6.3 6.3C4.2 7.8 3 12 3 12s3.5 7 9 7c1.2 0 2.3-.3 3.3-.8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <path
+              d="M3 12s3.5-7 9-7 9 7 9 7-3.5 7-9 7-9-7-9-7Z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinejoin="round"
+            />
+            <circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
+          </svg>
+        )}
+      </button>
+    </span>
+  );
+}
+
 export function Badge({
   children,
   tone = 'muted',
@@ -148,11 +208,28 @@ export function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
 }
 
+function validationLines(value: unknown, field = ''): string[] {
+  if (typeof value === 'string') {
+    return [field ? `${field}: ${value}` : value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => validationLines(item, field));
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, item]) => {
+      const label = field || (key === 'non_field_errors' ? 'Request' : key.replaceAll('_', ' '));
+      return validationLines(item, label.charAt(0).toUpperCase() + label.slice(1));
+    });
+  }
+  return [];
+}
+
 export function ErrorNote({ error, plain = false }: { error: unknown; plain?: boolean }) {
   if (!error) return null;
   const code = isApiError(error) ? error.code : null;
   const status = isApiError(error) ? error.status : null;
   const details = isApiError(error) ? error.details : null;
+  const fieldErrors = plain && code === 'VALIDATION_ERROR' ? validationLines(details) : [];
   return (
     <div className="note note--error" role="alert">
       {plain ? null : (
@@ -161,7 +238,18 @@ export function ErrorNote({ error, plain = false }: { error: unknown; plain?: bo
           {status ? <span className="note__meta">HTTP {status}</span> : null}
         </div>
       )}
-      <p>{errorText(error)}</p>
+      {fieldErrors.length ? (
+        <>
+          <p>Please correct these fields:</p>
+          <ul className="note__list">
+            {fieldErrors.map((line, index) => (
+              <li key={`${line}-${index}`}>{line}</li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p>{errorText(error)}</p>
+      )}
       {!plain && details ? <pre className="json json--small">{JSON.stringify(details, null, 2)}</pre> : null}
     </div>
   );

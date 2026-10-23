@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
-import { Button, ErrorNote, Field } from '../../components/ui';
+import { Button, ErrorNote, Field, PasswordInput } from '../../components/ui';
 import { api } from '../../lib/api';
 import { safeNext, useSession } from '../../lib/session';
 
@@ -78,14 +78,11 @@ export function CandidateSignIn() {
             />
           </Field>
           <Field label="Password" hint="At least 8 characters." wide>
-            <input
-              className="input"
-              type="password"
+            <PasswordInput
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              required
               minLength={8}
               value={form.password}
-              onChange={(event) => setForm({ ...form, password: event.target.value })}
+              onChange={(password) => setForm({ ...form, password })}
             />
           </Field>
           {mode === 'register' ? (
