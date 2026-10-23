@@ -10,12 +10,12 @@ Living project memory and **the work queue**. Every session reads this first and
 
 ```
 Current milestone : M7
-State             : IN PROGRESS (prod images + compose + Caddy + scripts + CI DONE 2026-10-22; `deploy.yml` deferred by human; rollback proof open)
-Last session      : S16 (2026-10-22, M7 packaging + CI)
-Next action       : Human adds `deploy.yml` (image push + SSH deploy). Then prove `rollback.sh` on a Linux host with two tags. M8 waits on VPS/DNS/secrets.
-Last green verify : 2026-10-22 (ruff clean, format 150 files, mypy x3 Success, pytest 11 + 89 + 78 = 178)
-Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
-Frontend          : three surfaces: public site (warm paper), signed-in recruiter/candidate portals (same warm tokens, sidebar/tabs), `/admin` ops console (dark); react-router-dom with session guards and silent refresh; CV upload/preview; 1440 + 500 px screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean; prod stack serves it behind Caddy on `app.<domain>`
+State             : IN PROGRESS (prod packaging + CI DONE 2026-10-22; single-host path routing implemented 2026-10-23; `deploy.yml` deferred by human; rollback proof open)
+Last session      : S17 (2026-10-23, single-host path routing)
+Next action       : Human reviews the pushed path-routing diff, then adds `deploy.yml` (image push + SSH deploy). Prove `rollback.sh` on a Linux host with two tags. M8 waits on VPS/DNS/secrets.
+Last green verify : 2026-10-23 (ruff clean, format 150 files, mypy x3 Success, pytest 11 + 89 + 78 = 178)
+Last green e2e    : 2026-10-23 (5/5 scenarios in 308.7s, final consistency 8/8 jobs)
+Frontend          : three surfaces: public site (warm paper), signed-in recruiter/candidate portals (same warm tokens, sidebar/tabs), `/admin` ops console (dark); react-router-dom with session guards and silent refresh; CV upload/preview; 1440 + 500 px screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean; prod stack serves it behind Caddy on `SITE_DOMAIN` with `/api/job/*` and `/api/candidate/*`
 
 Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [x] M7A  [~] M7  [ ] M8  [ ] M9`
 
@@ -224,19 +224,21 @@ Goal: replace the one-page public portals with LinkedIn-style multipage flows, a
 
 - [x] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `python:3.12-slim`, non-root uid 10001, prod deps only, gunicorn 2x4, `HEALTHCHECK` with `urllib` and `X-Forwarded-Proto: https`); root `.dockerignore`.
 - [x] `deploy/docker-compose.prod.yml`: caddy, frontend, kafka (heap capped, volume), job-db, candidate-db (volumes, healthchecks), job-service, candidate-service, `job-relay`, `candidate-consumer`, `candidate-reconciler`, `*-migrate` one-shot services, log rotation, `mem_limit`s per §11 budget, only Caddy publishes ports, private network.
-- [x] `deploy/Caddyfile`: three domains from env (`JOB_DOMAIN`, `CANDIDATE_DOMAIN`, `FRONTEND_DOMAIN`), `/internal/*` -> 404, security headers, `reverse_proxy`; `tls internal` / ACME email via `CADDY_TLS`.
+- [x] `deploy/Caddyfile`: one public host (`SITE_DOMAIN`) with `/api/job/*` and `/api/candidate/*` path routes (`handle_path` strips the prefix), everything else to the frontend; `/internal/*` blocked, security headers, `reverse_proxy`; `tls internal` / ACME email via `CADDY_TLS`.
+  - [2026-10-23, S17] Single-host routing verified locally: `caddy validate` clean; API, portal deep links, CV download, refresh, and edge `/internal` 404s all pass through `https://jaagir.localhost:8443`. `FORCE_SCRIPT_NAME` keeps `reverse()` URLs prefixed.
 - [x] `deploy/scripts/`: `bootstrap-vps.sh` (docker, ufw, deploy user, dirs), `render-env.sh` (secrets -> `.env`, chmod 600, never echoed), `deploy.sh`, `rollback.sh`, `backup-db.sh` (+ cron example).
 - [ ] `ci.yml` complete (lint, typecheck, tests with compose infra, **migration check** up/down/up per service on fresh DB + immutability check, image build, e2e on main). `deploy.yml` **deferred by the human** (they will add it; do not create it).
   - [2026-10-22, S16] `.github/workflows/ci.yml` rewritten: backend (uv lock check, ruff, mypy, pytest), migration check + immutability, frontend build, image build, `actionlint`, secret scan, e2e on `main` push only. `actionlint` clean. No `deploy.yml` (human decision).
   - CI job list to reach (M1 has only the first + frontend): (1) ruff lint + format check, (2) mypy per service, (3) unit tests, (4) **integration tests** with `docker compose ... up -d --wait` infra, (5) **migration check** (fresh DB migrate, reverse, forward; fail if a committed migration changed), (6) **Docker image build** for both services + frontend (no push on PR), (7) `actionlint` on the workflow YAML, (8) e2e outage suite on `main`, (9) secret scan (`gitleaks` or `git grep -nEi 'password|secret|BEGIN .*KEY'`), (10) `uv.lock` / `package-lock.json` freshness check. (P1) advisory CVE scan (`pip-audit`, `npm audit`).
 - [x] `docs/deployment.md` listing required GitHub secrets/variables and VPS prerequisites.
 - **Acceptance:** `docker build` both images OK; `make prod-local` brings the whole stack up behind Caddy and both `/readyz` respond via Caddy; `/internal/*` through Caddy -> 404; `deploy.sh` rollback proven locally by deploying a deliberately broken tag; workflow YAML passes `actionlint` (if available). Real GitHub run is verified by the human.
-  - [2026-10-22, S16] Images build and boot: `docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build --wait` -> all 11 services healthy; `https://jobs.localhost:8443/readyz` 200, `https://candidates.localhost:8443/readyz` 200 (`consumer: up`, `kafka: up`), `/internal/admin/outbox` through Caddy 404, `https://app.localhost:8443/` 200. `actionlint` clean, shellcheck clean, `compose config` clean. **Still open:** `deploy.sh` rollback proof (needs a GHCR tag pair and a Linux host) and the real GitHub run.
+  - [2026-10-22, S16] Images build and boot: `docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build --wait` -> all 11 services healthy; `https://jobs.localhost:8443/readyz` 200, `https://candidates.localhost:8443/readyz` 200 (`consumer: up`, `kafka: up`), `/internal/admin/outbox` through Caddy 404, `https://app.localhost:8443/` 200. `actionlint` clean, shellcheck clean, `compose config` clean. (The three-domain URLs in this line were replaced by the single-host routing on 2026-10-23.) **Still open:** `deploy.sh` rollback proof (needs a GHCR tag pair and a Linux host) and the real GitHub run.
+  - [2026-10-23, S17] Single host verified: `https://jaagir.localhost:8443/api/job/readyz` 200, `/api/candidate/readyz` 200, `/api/job/jobs` 200, both `/api/*/docs` 200, `/api/*/schema` 200, `/api/*/internal/admin/*` 404, `/internal/*` 404, `/`, `/jobs`, `/me`, `/employers`, `/me/dashboard` 200 with no browser console or `/api/*` failures. Register/login/refresh (both roles), publish, CV upload/download, and apply all passed through Caddy. `FORCE_SCRIPT_NAME` makes `resume_url` include `/api/candidate`. Full `./tasks.ps1 verify` green; `caddy validate` clean; shellcheck clean; `render-env.sh` test wrote the expected derived URLs.
 
 ### M8: VPS deployment (HUMAN-GATED)
 - [ ] Preconditions (see Blocked): proposal approved, VPS up, DNS A records resolving, SSH key + GitHub secrets set.
 - [ ] Run `bootstrap-vps.sh`; first deploy through the workflow; fix environment-specific issues (record every one in Gotchas; this milestone generates the most of them).
-- [ ] `scripts/smoke.sh https://jobs.<domain> https://candidates.<domain>`: recruiter register/login -> create+publish job -> appears in candidate search within seconds -> candidate registers -> applies -> duplicate apply 409 -> history shows it -> recruiter sees the application.
+- [ ] `scripts/smoke.sh https://<SITE_DOMAIN>`: recruiter register/login -> create+publish job -> appears in candidate search within seconds -> candidate registers -> applies -> duplicate apply 409 -> history shows it -> recruiter sees the application.
 - [ ] Run the outage demo on the VPS (stop/start Kafka container) and append the transcript to `docs/outage-recovery.md`.
 - [ ] Test a deliberate bad deploy -> auto-rollback; record in `docs/runbook.md`.
 - [ ] Record the live URLs in README.
@@ -368,6 +370,10 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-22, M7] `actionlint` rejected `ci.yml`: an unquoted step name contained `: ` ("Typecheck (one run per service: ...)"). Fix: remove the colon from the plain scalar (use a semicolon).
 - [2026-10-22, M7] Caddy added `Strict-Transport-Security: max-age=31536000` unconditionally, overriding Django, so a local `*.localhost` trial pins the browser to HTTPS and breaks other local HTTP apps. Fix: Caddy uses `{$HSTS_HEADER}`, compose defaults it to the production value, and the local env example sets `HSTS_HEADER=max-age=0` (Django reads `SECURE_HSTS_SECONDS`).
 - [2026-10-22, M7] This Windows box has no usable `bash` (the `bash` command is a WSL stub that errors with `execvpe(/bin/bash) failed`). Fix: lint POSIX scripts with `docker run --rm -v "${PWD}:/repo" koalaman/shellcheck:stable ...` and run them on Linux/WSL/CI only.
+- [2026-10-23, M7] Path routing needs both halves: `handle_path` strips `/api/job` or `/api/candidate` before the proxy, and Django needs the matching `FORCE_SCRIPT_NAME`. Without it `reverse()` returns `/candidates/me/resume` and clients get a 404 through Caddy. Fix: set `FORCE_SCRIPT_NAME` in prod settings from env and in compose.
+- [2026-10-23, M7] A top-level Caddy `path /api/job/internal/*` matcher does not exist after `handle_path` strips the prefix. Fix: block `/internal`, `/internal/*`, `/api/job/internal/*`, and `/api/candidate/internal/*` at the top, and add a stripped-path `/internal` guard inside each API block. Bare `/api/job` and `/api/candidate` return 404.
+- [2026-10-23, M7] Testing `FORCE_SCRIPT_NAME` with `override_settings` and the Django test client does not prefix `reverse()` URLs in that context. Do not treat the unit test result as the production answer; verify the live Caddy path instead.
+- [2026-10-23, M7] `verify` needs the dev Postgres containers on host ports 5433/5434. After work on the prod stack those containers can be stopped while still listed, and every DB test then waits on a connection timeout (the suite ran 9 minutes and errored 86 tests). Fix: run `./tasks.ps1 infra-up` and confirm `Get-NetTCPConnection -LocalPort 5433 -State Listen` before blaming the code.
 
 ---
 
@@ -434,6 +440,7 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-22, M7] Production serves three domains (`jobs.*`, `candidates.*`, `app.*`), and the frontend is its own nginx container behind Caddy. Why: the portal is a separate static artifact and `app.*` matches the two-world SPA. Rejected: serving the bundle from Caddy directly (no separate cache/health surface).
 - [2026-10-22, M7] HSTS is configurable (`SECURE_HSTS_SECONDS` for Django, `HSTS_HEADER` for Caddy) and the local prod example sets both to `0` / `max-age=0`. Why: a year-long HSTS from a `*.localhost` trial pins the browser to HTTPS and breaks the dev stack. Rejected: unconditional Caddy HSTS (the original bug).
 - [2026-10-22, M7] Background workers and one-shot migration containers disable the inherited HTTP healthcheck. Why: they run no web server, so the image healthcheck always fails and blocks `up --wait` / the deploy gate. Rejected: giving workers a fake healthcheck (meaningless).
+- [2026-10-23, M7] Production serves ONE host (`SITE_DOMAIN`) with path prefixes: `/api/job/*` and `/api/candidate/*` go to the services (prefix stripped), all other paths go to the frontend. Caddy `handle_path` strips the prefix and Django `FORCE_SCRIPT_NAME` restores it in generated URLs. Why: a single domain is simpler to certificate, DNS, and share; the SPA already uses `/api/job` and `/api/candidate` bases. Supersedes the 2026-10-22 three-domain decision. Rejected: three subdomains (more DNS/cert moving parts), serving APIs on the SPA origin without prefixes (collides with SPA routes).
 
 ---
 
@@ -443,7 +450,7 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [ ] (HUMAN) Save the original assignment text as `docs/ASSIGNMENT.md`.
 - [ ] (HUMAN, M0) Send `docs/PROPOSAL.md` to reviewer/DevOps. Sent: ____ Response: ____
 - [ ] (HUMAN, M7) Add `.github/workflows/deploy.yml` (GHCR push + SSH deploy + health gate + rollback). The repo scripts it should call are in `deploy/scripts/`; the secret list is in `docs/deployment.md`.
-- [ ] (HUMAN, M8) VPS provisioned (IP: ____), domains: `jobs.____` / `candidates.____` / `app.____`, A records resolving.
+- [ ] (HUMAN, M8) VPS provisioned (IP: ____), single site domain (`SITE_DOMAIN`: ____) with an A record resolving.
 - [ ] (HUMAN, M8) GitHub environment secrets set (see `docs/deployment.md` once M7 is done): SSH key/host/user, DB passwords, JWT keys (base64 PEM), `INTERNAL_TOKEN`.
 
 ---
@@ -638,3 +645,17 @@ Template:
 - Not done / left half-way: `deploy.yml` intentionally not created (human owns it); `deploy.sh` rollback not proven (needs GHCR tags + Linux host); real GitHub run not observed; e2e not re-run this session (prod-only changes, last green S14).
 - Gotchas/decisions added: contracts wheel built before its source is copied; worker healthchecks inherited from web image; actionlint colon in step name; Caddy HSTS poisoning; no usable `bash` on this box; decisions on `deploy.yml`, three domains, configurable HSTS, disabled worker healthchecks.
 - Next session should start with: human adds `deploy.yml`; then prove `rollback.sh` on Linux; M8 when VPS/DNS/secrets exist. Remaining M7 evidence: real GitHub CI run + rollback.
+
+### Session 17: 2026-10-23: M7 single-host path routing
+- Did: replaced the three-domain prod layout with one public host. `deploy/Caddyfile` uses `route` + `handle_path` for `/api/job/*` and `/api/candidate/*`, frontend fallback, ordered `/internal` blocks, and security headers. `deploy/docker-compose.prod.yml` sets `FORCE_SCRIPT_NAME` per web service, requires `SITE_DOMAIN`, and keeps HSTS without `preload`. Both services read `FORCE_SCRIPT_NAME` from env. `deploy/scripts/render-env.sh` now derives all three public URLs from `SITE_DOMAIN`. Candidate `resume_url` uses `reverse()` so generated links keep the prefix. Updated `deploy/.env.prod.example`, `docs/deployment.md`, `Makefile`, `tasks.ps1`, `ARCHITECTURE.md`, and added a `.gitignore` exception for the prod env template. Removed the stray empty `deploy/scripts/ping` file from a misleading earlier commit.
+- Verified (commands + result):
+  - `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178.
+  - `caddy validate` -> valid; `docker compose config --quiet` -> clean; shellcheck -> clean.
+  - Full prod rebuild -> all services healthy. Through `https://jaagir.localhost:8443`: both `/api/*/readyz`, `/api/job/jobs`, both `/api/*/docs` and `/schema` return 200; `/internal/*`, `/api/*/internal/admin/*`, bare `/api/job`, bare `/api/candidate` return 404.
+  - Playwright: `/`, `/jobs`, `/me`, `/employers`, `/jobs/:id`, `/me/dashboard` all 200; same-origin `fetch('/api/job/jobs')` 200; no console errors or failed `/api/*` responses; no horizontal overflow at 1440 px.
+  - Live flow: recruiter register/login/refresh, create/publish, candidate register/refresh, CV upload/download, apply, and recruiter application detail all pass through Caddy. `resume_url` includes `/api/candidate`. HSTS header has no `preload`; local trial value is `max-age=0`.
+  - `render-env.sh` in a Linux container wrote `SITE_DOMAIN`, derived `/api/job` and `/api/candidate` URLs, `ALLOWED_HOSTS`, and HSTS without `preload`; an invalid `SITE_DOMAIN` with a scheme is rejected.
+  - `./tasks.ps1 e2e` -> `5/5 scenarios passed in 308.7s`; final assertion `8 non-draft jobs identical in both databases`.
+- Not done / left half-way: no commit yet at session end (committed immediately after this entry). `deploy.yml` still human-owned; `deploy.sh` rollback still unproven; e2e not re-run because only prod routing changed.
+- Gotchas/decisions added: `handle_path` + `FORCE_SCRIPT_NAME` must agree; top-level internal matchers do not match stripped paths; `override_settings(FORCE_SCRIPT_NAME)` does not emulate the live script prefix. Decision: one host with path prefixes supersedes the three-domain layout.
+- Next session should start with: review the pushed diff, add `deploy.yml`, prove rollback on Linux. M8 waits on VPS/DNS/secrets.

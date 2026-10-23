@@ -1,12 +1,12 @@
 # Production reverse proxy for the Job Portal.
 #
-# Three sites, all terminated by Caddy:
-#   {$JOB_DOMAIN}         -> job-service:3001
-#   {$CANDIDATE_DOMAIN}   -> candidate-service:3002
-#   {$FRONTEND_DOMAIN}    -> frontend static bundle (nginx:8080)
+# One site, path-based:
+#   {$SITE_DOMAIN}/api/job/*        -> job-service:3001   (prefix stripped)
+#   {$SITE_DOMAIN}/api/candidate/*  -> candidate-service:3002 (prefix stripped)
+#   {$SITE_DOMAIN}/*                -> frontend static bundle (nginx:8080)
 #
-# `/internal/*` is a hard 404 at the edge (invariant I8). Services only talk to
-# each other over the private compose network.
+# `/internal/*` and `/api/*/internal/*` are a hard 404 at the edge (I8).
+# Services only talk to each other over the private compose network.
 #
 # TLS:
 #   CADDY_TLS unset/empty -> automatic public ACME certificates
@@ -14,7 +14,9 @@
 #   CADDY_TLS=<email>     -> automatic ACME with that account email
 #
 # Caddy sets X-Forwarded-Proto automatically, which Django uses through
-# SECURE_PROXY_SSL_HEADER to stop the HTTPS redirect loop.
+# SECURE_PROXY_SSL_HEADER to stop the HTTPS redirect loop. Django also sets
+# FORCE_SCRIPT_NAME=/api/job or /api/candidate so generated URLs and slash
+# redirects keep the public prefix.
 
 (security_headers) {
 	header {
@@ -24,25 +26,36 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-	@internal path /internal /internal/*
-	respond @internal "Not Found" 404
 	encode zstd gzip
 }
 
-{$JOB_DOMAIN} {
+{$SITE_DOMAIN} {
 	tls {$CADDY_TLS}
 	import security_headers
-	reverse_proxy job-service:3001
-}
+	route {
+		# Legacy and edge paths. These run on the original request path.
+		@edgeInternal path /internal /internal/* /api/job/internal /api/job/internal/* /api/candidate/internal /api/candidate/internal/*
+		respond @edgeInternal "Not Found" 404
 
-{$CANDIDATE_DOMAIN} {
-	tls {$CADDY_TLS}
-	import security_headers
-	reverse_proxy candidate-service:3002
-}
+		# A bare API root has no meaning; do not let the SPA answer it.
+		@apiRoot path /api/job /api/candidate
+		respond @apiRoot "Not Found" 404
 
-{$FRONTEND_DOMAIN} {
-	tls {$CADDY_TLS}
-	import security_headers
-	reverse_proxy frontend:8080
+		handle_path /api/job/* {
+			# The prefix is stripped here, so match the remaining path.
+			@internal path /internal /internal/*
+			respond @internal "Not Found" 404
+			reverse_proxy job-service:3001
+		}
+
+		handle_path /api/candidate/* {
+			@internal path /internal /internal/*
+			respond @internal "Not Found" 404
+			reverse_proxy candidate-service:3002
+		}
+
+		handle {
+			reverse_proxy frontend:8080
+		}
+	}
 }

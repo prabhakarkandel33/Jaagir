@@ -12,7 +12,7 @@ Two independently deployable services, each with its own PostgreSQL database and
 
 | | Job Service | Candidate & Application Service |
 |---|---|---|
-| Domain | `jobs.<domain>` | `candidates.<domain>` |
+| Public path | `/api/job/*` on `SITE_DOMAIN` | `/api/candidate/*` on `SITE_DOMAIN` |
 | Port (internal) | 3001 | 3002 |
 | Database | `job_db` (own Postgres container) | `candidate_db` (own Postgres container) |
 | Owns | recruiters, jobs, outbox | candidates, applications, **replica** of jobs |
@@ -47,9 +47,9 @@ flowchart LR
     end
     KAFKA[["Kafka: jobs.events.v1 + jobs.events.v1.dlq"]]
   end
-  CADDY -->|jobs.domain| JAPI
-  CADDY -->|candidates.domain| CAPI
-  CADDY -->|app.domain| FRONTEND
+  CADDY -->|/api/job/*| JAPI
+  CADDY -->|/api/candidate/*| CAPI
+  CADDY -->|all other paths| FRONTEND
   RELAY -->|produce| KAFKA
   KAFKA -->|consume| CONS
   RECON -.->|"GET /internal/jobs/snapshot (internal net)"| JAPI
@@ -256,7 +256,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 ## 8. API surface (summary; full OpenAPI generated at `/docs`)
 
-**Job Service (`jobs.<domain>`)**
+**Job Service (public prefix `/api/job`) + `SITE_DOMAIN`**
 - `POST /auth/recruiters/register` · `POST /auth/recruiters/login` · `POST /auth/recruiters/refresh` · `GET|PUT /recruiters/me`
 - `GET /recruiter/dashboard` (job counts by status + recent jobs)
 - `POST /recruiter/jobs` (creates DRAFT) · `GET /recruiter/jobs` · `GET|PUT /recruiter/jobs/:id` · `POST /recruiter/jobs/:id/publish` · `POST /recruiter/jobs/:id/close`
@@ -264,7 +264,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 - Internal: `GET /internal/jobs/snapshot` · `GET /internal/jobs/:id` · `GET /internal/admin/outbox`
 - `GET /healthz` (liveness) · `GET /readyz` (DB required; Kafka reported, never fails readiness)
 
-**Candidate & Application Service (`candidates.<domain>`)**
+**Candidate & Application Service (public prefix `/api/candidate`) + `SITE_DOMAIN`**
 - `POST /auth/candidates/register` · `POST /auth/candidates/login` · `POST /auth/candidates/refresh` · `GET|PUT /candidates/me`
 - `GET /candidates/me/dashboard` · `GET /candidates/me/resume` · `POST|DELETE /candidates/me/resume` (PDF, <= 5 MiB)
 - `GET /jobs` (search replica) · `GET /jobs/:id`
@@ -288,7 +288,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 ## 10. Deployment & CI/CD
 
-**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `frontend` (nginx, static bundle) · `job-service` · `candidate-service` · `job-relay` · `candidate-consumer` · `candidate-reconciler` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. Three domains from env: `jobs.*`, `candidates.*`, `app.*`. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container. The Candidate Service writes uploaded CVs to a named `candidate-media` volume mounted at `MEDIA_ROOT`; the nightly backup includes that volume (M7A).
+**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `frontend` (nginx, static bundle) · `job-service` · `candidate-service` · `job-relay` · `candidate-consumer` · `candidate-reconciler` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. One host from env: `SITE_DOMAIN`. Caddy routes `/api/job/*` and `/api/candidate/*` to the services with the prefix stripped, and every other path to the frontend. Django sets `FORCE_SCRIPT_NAME` to the same prefix. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container. The Candidate Service writes uploaded CVs to a named `candidate-media` volume mounted at `MEDIA_ROOT`; the nightly backup includes that volume (M7A).
 
 **ci.yml (PR + push):** `uv lock --check` + lint + typecheck -> unit + integration tests -> **migration check** (fresh DB `migrate`, reverse the latest migration, forward again; fail if `makemigrations --check` reports drift) -> committed-migration immutability check -> frontend build -> Docker image build (no push on PRs) -> `actionlint` + secret scan -> e2e outage suite on `main`.
 
@@ -337,7 +337,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 **Storage justification:** OS+Docker ~10 GB, images ~3 GB (keep last 3 tags), Postgres data < 3 GB at assumed scale, Kafka < 1 GB (7-day retention), CV media on the candidate volume (capped at 5 MiB per file), logs capped ~300 MB, backups ~5-10 GB, headroom for growth.
 
-**Domains / DNS:** `jobs.<domain>`, `candidates.<domain>` and `app.<domain>`, `A` records to the VPS IP (and `AAAA` if IPv6). DNS must resolve **before** first deploy so Caddy can obtain Let's Encrypt certificates.
+**Domains / DNS:** one public host (`SITE_DOMAIN`), with an `A` record to the VPS IP (and `AAAA` if IPv6). DNS must resolve **before** first deploy so Caddy can obtain Let's Encrypt certificates.
 
 **Additional requirements**
 - Inbound: 22 (restricted to known IPs if possible), 80, 443. Nothing else public (no 5432, no 9092).

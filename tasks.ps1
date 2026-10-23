@@ -108,7 +108,7 @@ switch ($Target) {
             Write-Output 'prod-local: created deploy/.env.prod from the example'
         }
         docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build
-        Write-Output 'portal: https://app.localhost:8443 (internal CA; curl -k)'
+        Write-Output 'portal: https://jaagir.localhost:8443 (internal CA; curl -k)'
     }
     'prod-down' { docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml down }
     'prod-logs' { docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml logs -f }

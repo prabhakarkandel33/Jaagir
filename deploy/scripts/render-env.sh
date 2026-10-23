@@ -5,15 +5,14 @@
 # never echoed and the file is written with mode 600. It replaces the target
 # atomically, so a failed render leaves the previous file intact.
 #
-#   JOB_DOMAIN=jobs.example.com CANDIDATE_DOMAIN=candidates.example.com \
-#   FRONTEND_DOMAIN=app.example.com DJANGO_SECRET_KEY=... \
+#   SITE_DOMAIN=jaagir.example.com DJANGO_SECRET_KEY=... \
 #   ./deploy/scripts/render-env.sh /opt/jobportal/.env
 #
 # Required: DJANGO_SECRET_KEY, INTERNAL_TOKEN, ADMIN_PASSWORD,
 #           JOB_DB_PASSWORD, CANDIDATE_DB_PASSWORD,
 #           JOB_JWT_SIGNING_KEY, JOB_JWT_PUBLIC_KEY,
 #           CANDIDATE_JWT_SIGNING_KEY, CANDIDATE_JWT_PUBLIC_KEY,
-#           JOB_DOMAIN, CANDIDATE_DOMAIN, FRONTEND_DOMAIN.
+#           SITE_DOMAIN (host only, no scheme or trailing slash).
 set -euo pipefail
 
 TARGET="${1:-/opt/jobportal/.env}"
@@ -30,9 +29,14 @@ for name in DJANGO_SECRET_KEY INTERNAL_TOKEN ADMIN_PASSWORD \
   JOB_DB_PASSWORD CANDIDATE_DB_PASSWORD \
   JOB_JWT_SIGNING_KEY JOB_JWT_PUBLIC_KEY \
   CANDIDATE_JWT_SIGNING_KEY CANDIDATE_JWT_PUBLIC_KEY \
-  JOB_DOMAIN CANDIDATE_DOMAIN FRONTEND_DOMAIN; do
+  SITE_DOMAIN; do
   require "${name}"
 done
+
+if [[ "${SITE_DOMAIN}" == *"://"* || "${SITE_DOMAIN}" == */* ]]; then
+  echo "render-env: SITE_DOMAIN must be a host name only (no scheme or slash)" >&2
+  exit 1
+fi
 
 # Values are written shell-safe because deploy.sh sources this file. Secrets
 # should not contain newlines; quote everything and escape single quotes.
@@ -41,10 +45,10 @@ quote() {
   printf "'%s'" "${value//\'/\'\\\'\'}"
 }
 
-JOB_PUBLIC_URL="${JOB_PUBLIC_URL:-https://${JOB_DOMAIN}}"
-CANDIDATE_PUBLIC_URL="${CANDIDATE_PUBLIC_URL:-https://${CANDIDATE_DOMAIN}}"
-FRONTEND_PUBLIC_URL="${FRONTEND_PUBLIC_URL:-https://${FRONTEND_DOMAIN}}"
-ALLOWED_HOSTS="${ALLOWED_HOSTS:-${JOB_DOMAIN},${CANDIDATE_DOMAIN},${FRONTEND_DOMAIN},localhost,127.0.0.1}"
+JOB_PUBLIC_URL="https://${SITE_DOMAIN}/api/job"
+CANDIDATE_PUBLIC_URL="https://${SITE_DOMAIN}/api/candidate"
+FRONTEND_PUBLIC_URL="https://${SITE_DOMAIN}"
+ALLOWED_HOSTS="${ALLOWED_HOSTS:-${SITE_DOMAIN},localhost,127.0.0.1}"
 
 TMP="$(mktemp "${TARGET}.XXXXXX")"
 trap 'rm -f "${TMP}"' EXIT
@@ -54,7 +58,7 @@ HSTS_MAX_AGE="${SECURE_HSTS_SECONDS:-31536000}"
 if [[ "${HSTS_MAX_AGE}" == "0" ]]; then
   HSTS_HEADER="max-age=0"
 else
-  HSTS_HEADER="max-age=${HSTS_MAX_AGE}; includeSubDomains; preload"
+  HSTS_HEADER="max-age=${HSTS_MAX_AGE}; includeSubDomains"
 fi
 
 {
@@ -65,9 +69,7 @@ fi
   echo "JOB_IMAGE=$(quote "${JOB_IMAGE:-jobportal/job-service}")"
   echo "CANDIDATE_IMAGE=$(quote "${CANDIDATE_IMAGE:-jobportal/candidate-service}")"
   echo "FRONTEND_IMAGE=$(quote "${FRONTEND_IMAGE:-jobportal/frontend}")"
-  echo "JOB_DOMAIN=$(quote "${JOB_DOMAIN}")"
-  echo "CANDIDATE_DOMAIN=$(quote "${CANDIDATE_DOMAIN}")"
-  echo "FRONTEND_DOMAIN=$(quote "${FRONTEND_DOMAIN}")"
+  echo "SITE_DOMAIN=$(quote "${SITE_DOMAIN}")"
   echo "JOB_PUBLIC_URL=$(quote "${JOB_PUBLIC_URL}")"
   echo "CANDIDATE_PUBLIC_URL=$(quote "${CANDIDATE_PUBLIC_URL}")"
   echo "FRONTEND_PUBLIC_URL=$(quote "${FRONTEND_PUBLIC_URL}")"

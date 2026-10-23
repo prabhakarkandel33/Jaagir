@@ -100,7 +100,7 @@ e2e:
 prod-local:
 	@test -f deploy/.env.prod || cp deploy/.env.prod.example deploy/.env.prod
 	docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build
-	@echo "portal: https://app.localhost:8443 (internal CA; curl -k)"
+	@echo "portal: https://jaagir.localhost:8443 (internal CA; curl -k)"
 
 prod-down:
 	docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml down

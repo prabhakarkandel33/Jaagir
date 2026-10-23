@@ -25,6 +25,7 @@ dist/
 .env
 .env.*
 !.env.example
+!deploy/.env.prod.example
 
 # --- Build / OS / editor ---
 build/

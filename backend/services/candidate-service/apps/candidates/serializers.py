@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.urls import reverse
 from rest_framework import serializers
 
 from apps.candidates.models import Candidate
@@ -41,7 +42,7 @@ class CandidateSerializer(serializers.ModelSerializer[Candidate]):
     def get_resume_url(self, obj: Candidate) -> str:
         # Guarded endpoint, not a media URL. Empty when nothing is uploaded.
         if obj.resume_file:
-            return "/candidates/me/resume"
+            return reverse("candidate-resume")
         return obj.resume_url
 
 

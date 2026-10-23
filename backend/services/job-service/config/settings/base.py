@@ -21,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 SECRET_KEY = env.django_secret_key
 DEBUG = env.debug
 ALLOWED_HOSTS = env.allowed_hosts_list
+FORCE_SCRIPT_NAME = env.force_script_name or None
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
@@ -110,6 +111,8 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/",
+    # Match the public path prefix so Swagger "Try it out" calls the right URL.
+    "SERVERS": [{"url": env.force_script_name}] if env.force_script_name else [],
     "ENUM_NAME_OVERRIDES": {
         "JobStatusEnum": "apps.jobs.models.JobStatus",
         "EmploymentTypeEnum": "apps.jobs.models.EmploymentType",

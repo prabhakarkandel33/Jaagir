@@ -51,6 +51,8 @@ class ServiceSettings(BaseSettings):
     database_url: PostgresDsn
 
     allowed_hosts: str = "*"
+    # Set when the service sits behind a path prefix (prod: /api/job).
+    force_script_name: str = ""
     cors_allowed_origins: str = ""
     body_max_bytes: int = 1_048_576
     # HSTS lifetime. Set 0 for a local HTTPS trial with an internal CA.
