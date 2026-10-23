@@ -1,0 +1,120 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA that is on main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy production
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      DEPLOY_SHA: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sha || github.event.workflow_run.head_sha }}
+      SITE_URL: https://jaagir.pratik.info.np
+
+    steps:
+      - name: Validate SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "DEPLOY_SHA must be 40 lowercase hexadecimal characters." >&2
+            exit 1
+          fi
+
+      - name: Deploy exact SHA over SSH
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${VPS_HOST:?missing VPS_HOST}"
+          : "${VPS_USER:?missing VPS_USER}"
+          : "${VPS_SSH_KEY:?missing VPS_SSH_KEY}"
+          : "${VPS_KNOWN_HOSTS:?missing VPS_KNOWN_HOSTS}"
+
+          KEY_FILE="$(mktemp)"
+          KNOWN_HOSTS_FILE="$(mktemp)"
+          trap 'rm -f "${KEY_FILE}" "${KNOWN_HOSTS_FILE}"' EXIT
+          chmod 600 "${KEY_FILE}" "${KNOWN_HOSTS_FILE}"
+          printf '%s\n' "${VPS_SSH_KEY}" > "${KEY_FILE}"
+          printf '%s\n' "${VPS_KNOWN_HOSTS}" > "${KNOWN_HOSTS_FILE}"
+
+          ssh \
+            -i "${KEY_FILE}" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "${VPS_USER}@${VPS_HOST}" "${DEPLOY_SHA}"
+
+      - name: Smoke check public site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_200() {
+            local path="$1"
+            local status
+            echo "check 200 ${SITE_URL}${path}"
+            if ! status="$(curl --silent --show-error --location \
+              --retry 5 --retry-delay 5 --retry-connrefused --max-time 30 \
+              --output /dev/null --write-out '%{http_code}' "${SITE_URL}${path}")"; then
+              echo "request failed for ${path}" >&2
+              exit 1
+            fi
+            if [[ "${status}" != "200" ]]; then
+              echo "expected 200 for ${path}, got ${status}" >&2
+              exit 1
+            fi
+          }
+
+          check_404() {
+            local path="$1"
+            local status
+            echo "check 404 ${SITE_URL}${path}"
+            if ! status="$(curl --silent --show-error --location \
+              --retry 5 --retry-delay 5 --retry-connrefused --max-time 30 \
+              --output /dev/null --write-out '%{http_code}' "${SITE_URL}${path}")"; then
+              echo "request failed for ${path}" >&2
+              exit 1
+            fi
+            if [[ "${status}" != "404" ]]; then
+              echo "expected 404 for ${path}, got ${status}" >&2
+              exit 1
+            fi
+          }
+
+          check_200 /healthz
+          check_200 /api/job/readyz
+          check_200 /api/candidate/readyz
+          check_404 /internal/admin/outbox
+          check_404 /api/job/internal/admin/outbox
+          check_404 /api/candidate/internal/admin/outbox
