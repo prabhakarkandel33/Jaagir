@@ -687,6 +687,7 @@ def main() -> int:
     if unknown:
         parser.error(f"unknown scenario(s): {unknown}")
 
+    ensure_dev_env()
     token = _internal_token()
     results: list[Result] = []
     started_all = time.monotonic()
@@ -757,6 +758,20 @@ def main() -> int:
         if not item.ok:
             print(f"  FAILED {item.name}: {item.message}")
     return 0 if passed == len(results) else 1
+
+
+def ensure_dev_env() -> None:
+    env_files = [
+        ROOT / "backend" / "services" / "job-service" / ".env",
+        ROOT / "backend" / "services" / "candidate-service" / ".env",
+    ]
+    if all(path.exists() for path in env_files):
+        return
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_dev_env.py")],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 def _internal_token() -> str:

@@ -42,8 +42,8 @@ jobs:
         working-directory: backend
         run: |
           uv run mypy packages/contracts/src
-          uv run mypy services/job-service
-          uv run mypy services/candidate-service
+          (cd services/job-service && uv run mypy --config-file mypy.ini .)
+          (cd services/candidate-service && uv run mypy --config-file mypy.ini .)
 
       - name: Start infrastructure
         run: docker compose -f deploy/docker-compose.dev.yml up -d --wait
