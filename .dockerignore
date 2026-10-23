@@ -1,0 +1,22 @@
+# Build context for the service images is the repository root (the Dockerfile
+# needs backend/uv.lock and backend/packages/contracts). Keep the context small
+# and never send local secrets or dependency caches to the daemon.
+.git
+.github
+.venv
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+**/*.egg-info
+**/.env
+**/media
+**/staticfiles
+frontend/node_modules
+frontend/dist
+docs/screenshots
+e2e/*.log

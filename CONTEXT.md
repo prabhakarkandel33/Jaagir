@@ -9,15 +9,15 @@ Living project memory and **the work queue**. Every session reads this first and
 ## 1. Status board
 
 ```
-Current milestone : M7A
-State             : IN PROGRESS (Phase 1 backend DONE 2026-10-20; Phase 2 frontend foundation NEXT)
-Last session      : S13 (2026-10-20, Phase 1 backend)
-Next action       : Phase 2 frontend foundation: react-router-dom, lib/session.tsx, PublicShell/PortalShell, guards, signed-in redirects, real /jobs/:id page
-Last green verify : 2026-10-20 (ruff clean, format 150 files, mypy x3 Success, pytest 11 + 89 + 78 = 178)
+Current milestone : M7
+State             : IN PROGRESS (prod images + compose + Caddy + scripts + CI DONE 2026-10-22; `deploy.yml` deferred by human; rollback proof open)
+Last session      : S16 (2026-10-22, M7 packaging + CI)
+Next action       : Human adds `deploy.yml` (image push + SSH deploy). Then prove `rollback.sh` on a Linux host with two tags. M8 waits on VPS/DNS/secrets.
+Last green verify : 2026-10-22 (ruff clean, format 150 files, mypy x3 Success, pytest 11 + 89 + 78 = 178)
 Last green e2e    : 2026-10-20 (5/5 scenarios, four consecutive green runs)
-Frontend          : three surfaces: public site (warm paper), signed-in recruiter/candidate portals (same warm tokens, sidebar/tabs), `/admin` ops console (dark); react-router-dom with session guards and silent refresh; CV upload/preview; 1440 + 500 px screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean
+Frontend          : three surfaces: public site (warm paper), signed-in recruiter/candidate portals (same warm tokens, sidebar/tabs), `/admin` ops console (dark); react-router-dom with session guards and silent refresh; CV upload/preview; 1440 + 500 px screenshots in `docs/screenshots/`; containerized on :5174 (nginx-unprivileged), `npm run build` clean; prod stack serves it behind Caddy on `app.<domain>`
 
-Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [x] M7A  [ ] M7  [ ] M8  [ ] M9`
+Progress: `[~] M0  [x] M1  [x] M2  [x] M3  [x] M4  [x] M5  [x] M6  [x] M7A  [~] M7  [ ] M8  [ ] M9`
 
 ---
 
@@ -222,14 +222,16 @@ Goal: replace the one-page public portals with LinkedIn-style multipage flows, a
 - [x] Two-world UI (human-requested): public site (`/`, `/jobs`, `/employers`, `/me`) in a warm paper theme with plain language, larger type, and a landing page; technical ops console at `/admin` on the existing dark theme, signed in with `ADMIN_USERNAME`/`ADMIN_PASSWORD` from each service `.env` via `POST /internal/admin/login`. Path routing replaces hash tabs; every page is served by the nginx container on `:5174`.
   - [2026-10-20, S10] `npm run build` clean (41 modules). Live on `:5174`: `/`, `/jobs`, `/employers`, `/me`, `/admin` -> 200; `POST :3001/internal/admin/login` and `:3002/...` return `{service, token}`; wrong credentials -> 401. Headless Edge screenshots at 1440 px and 500 px: landing, jobs (209,168 live results), employer sign-in, candidate sign-in, admin sign-in. `./tasks.ps1 verify` -> ruff clean, format 145 files, mypy x3, pytest 11 + 85 + 60 = 156.
 
-- [ ] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `node:22-slim`, non-root, prod deps only, `HEALTHCHECK` via node fetch, `.dockerignore`).
-- [ ] `deploy/docker-compose.prod.yml`: caddy, kafka (heap capped, volume), job-db, candidate-db (volumes, healthchecks), job-service, candidate-service, `*-migrate` one-shot services, log rotation, `mem_limit`s per §11 budget, only Caddy publishes ports, private network.
-- [ ] `deploy/Caddyfile`: both domains from env, `/internal/*` -> 404, security headers, `reverse_proxy`; support `tls internal` / staging ACME for testing.
-- [ ] `deploy/scripts/`: `bootstrap-vps.sh` (docker, ufw, deploy user, dirs), `render-env.sh` (secrets -> `.env`, chmod 600, never echoed), `deploy.sh`, `rollback.sh`, `backup-db.sh` (+ cron example).
-- [ ] `ci.yml` complete (lint, typecheck, tests with compose infra, **migration check** up/down/up per service on fresh DB + immutability check, image build, e2e on main). `deploy.yml` (GHCR push, SSH deploy, health gate, auto-rollback).
+- [x] Dockerfiles for both services (multi-stage, build context = repo root because of `packages/contracts`, `python:3.12-slim`, non-root uid 10001, prod deps only, gunicorn 2x4, `HEALTHCHECK` with `urllib` and `X-Forwarded-Proto: https`); root `.dockerignore`.
+- [x] `deploy/docker-compose.prod.yml`: caddy, frontend, kafka (heap capped, volume), job-db, candidate-db (volumes, healthchecks), job-service, candidate-service, `job-relay`, `candidate-consumer`, `candidate-reconciler`, `*-migrate` one-shot services, log rotation, `mem_limit`s per §11 budget, only Caddy publishes ports, private network.
+- [x] `deploy/Caddyfile`: three domains from env (`JOB_DOMAIN`, `CANDIDATE_DOMAIN`, `FRONTEND_DOMAIN`), `/internal/*` -> 404, security headers, `reverse_proxy`; `tls internal` / ACME email via `CADDY_TLS`.
+- [x] `deploy/scripts/`: `bootstrap-vps.sh` (docker, ufw, deploy user, dirs), `render-env.sh` (secrets -> `.env`, chmod 600, never echoed), `deploy.sh`, `rollback.sh`, `backup-db.sh` (+ cron example).
+- [ ] `ci.yml` complete (lint, typecheck, tests with compose infra, **migration check** up/down/up per service on fresh DB + immutability check, image build, e2e on main). `deploy.yml` **deferred by the human** (they will add it; do not create it).
+  - [2026-10-22, S16] `.github/workflows/ci.yml` rewritten: backend (uv lock check, ruff, mypy, pytest), migration check + immutability, frontend build, image build, `actionlint`, secret scan, e2e on `main` push only. `actionlint` clean. No `deploy.yml` (human decision).
   - CI job list to reach (M1 has only the first + frontend): (1) ruff lint + format check, (2) mypy per service, (3) unit tests, (4) **integration tests** with `docker compose ... up -d --wait` infra, (5) **migration check** (fresh DB migrate, reverse, forward; fail if a committed migration changed), (6) **Docker image build** for both services + frontend (no push on PR), (7) `actionlint` on the workflow YAML, (8) e2e outage suite on `main`, (9) secret scan (`gitleaks` or `git grep -nEi 'password|secret|BEGIN .*KEY'`), (10) `uv.lock` / `package-lock.json` freshness check. (P1) advisory CVE scan (`pip-audit`, `npm audit`).
-- [ ] `docs/deployment.md` listing required GitHub secrets/variables and VPS prerequisites.
+- [x] `docs/deployment.md` listing required GitHub secrets/variables and VPS prerequisites.
 - **Acceptance:** `docker build` both images OK; `make prod-local` brings the whole stack up behind Caddy and both `/readyz` respond via Caddy; `/internal/*` through Caddy -> 404; `deploy.sh` rollback proven locally by deploying a deliberately broken tag; workflow YAML passes `actionlint` (if available). Real GitHub run is verified by the human.
+  - [2026-10-22, S16] Images build and boot: `docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build --wait` -> all 11 services healthy; `https://jobs.localhost:8443/readyz` 200, `https://candidates.localhost:8443/readyz` 200 (`consumer: up`, `kafka: up`), `/internal/admin/outbox` through Caddy 404, `https://app.localhost:8443/` 200. `actionlint` clean, shellcheck clean, `compose config` clean. **Still open:** `deploy.sh` rollback proof (needs a GHCR tag pair and a Linux host) and the real GitHub run.
 
 ### M8: VPS deployment (HUMAN-GATED)
 - [ ] Preconditions (see Blocked): proposal approved, VPS up, DNS A records resolving, SSH key + GitHub secrets set.
@@ -361,6 +363,11 @@ Format: `- [YYYY-MM-DD, Mx] Symptom/surprise -> cause -> fix/rule.`
 - [2026-10-20, M7A] A fixed-position modal rendered inside `.portal-main` was clipped to the content column (`x=398` instead of centred) and did not dim the sidebar, because the page entry animation sets a transform and becomes the containing block for `position: fixed`. Fix: render `Modal` through `createPortal(..., document.body)`.
 - [2026-10-20, M7A] Headless Chromium does not render PDFs inside an `<iframe>` (blank white area), although headed Chromium shows the built-in viewer normally. Use a headed browser for PDF-preview screenshots; do not treat the blank headless iframe as a UI bug.
 - [2026-10-20, M7A] UI screenshots taken before the page entry animation settles look washed out (opacity < 1). Wait 800-1200 ms after navigation or after a route change before `page.screenshot()`.
+- [2026-10-22, M7] Prod images crashed with `ModuleNotFoundError: No module named 'contracts'` (only `contracts-*.dist-info` existed). Cause: `uv sync --all-packages` built the workspace wheel before `backend/packages/contracts/src` was copied. Fix: `COPY backend/packages/contracts/pyproject.toml` **and** `COPY backend/packages/contracts/src packages/contracts/src` before the sync, and sync with `--no-editable`.
+- [2026-10-22, M7] `job-relay`, `candidate-consumer` and `candidate-reconciler` inherited the image HTTP `HEALTHCHECK`, so they reported `unhealthy` (no web server on 3001/3002) and `compose up --wait` never settled. Fix: `healthcheck: disable: true` on workers and one-shot migrate services.
+- [2026-10-22, M7] `actionlint` rejected `ci.yml`: an unquoted step name contained `: ` ("Typecheck (one run per service: ...)"). Fix: remove the colon from the plain scalar (use a semicolon).
+- [2026-10-22, M7] Caddy added `Strict-Transport-Security: max-age=31536000` unconditionally, overriding Django, so a local `*.localhost` trial pins the browser to HTTPS and breaks other local HTTP apps. Fix: Caddy uses `{$HSTS_HEADER}`, compose defaults it to the production value, and the local env example sets `HSTS_HEADER=max-age=0` (Django reads `SECURE_HSTS_SECONDS`).
+- [2026-10-22, M7] This Windows box has no usable `bash` (the `bash` command is a WSL stub that errors with `execvpe(/bin/bash) failed`). Fix: lint POSIX scripts with `docker run --rm -v "${PWD}:/repo" koalaman/shellcheck:stable ...` and run them on Linux/WSL/CI only.
 
 ---
 
@@ -423,6 +430,10 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 - [2026-10-20, M7A] Portal routes are a flat list under pathless layout routes (`RequireRole` + `PortalShell`), not nested splats. Why: React Router v7 ranks `employers/*` above the exact `/employers` sign-in route, which produced an infinite `?next=` loop. Rejected: nested splat layouts (correct-looking, but cannot host the same-prefix public sign-in page).
 - [2026-10-20, M7A] Sign out does a full reload (`window.location.replace("/")`) instead of a soft `navigate`. Why: the guard re-renders before the state update and sends the user back to the sign-in page. Rejected: `flushSync` or a delayed navigate (both brittle).
 - [2026-10-20, M7A] The e2e stack publishes the built frontend on `:15174` and points its build args at `:13001`/`:13002`. Why: the dev stack owns `:5174`, and the e2e run must not fail on a port clash before any reliability scenario starts.
+- [2026-10-22, M7] `deploy.yml` is **not** created: the human will write the image-push + SSH deploy workflow. Why: explicit human instruction. Consequence: M7 stays in progress and the deploy-workflow traceability row is evidenced in M9 after the human adds it.
+- [2026-10-22, M7] Production serves three domains (`jobs.*`, `candidates.*`, `app.*`), and the frontend is its own nginx container behind Caddy. Why: the portal is a separate static artifact and `app.*` matches the two-world SPA. Rejected: serving the bundle from Caddy directly (no separate cache/health surface).
+- [2026-10-22, M7] HSTS is configurable (`SECURE_HSTS_SECONDS` for Django, `HSTS_HEADER` for Caddy) and the local prod example sets both to `0` / `max-age=0`. Why: a year-long HSTS from a `*.localhost` trial pins the browser to HTTPS and breaks the dev stack. Rejected: unconditional Caddy HSTS (the original bug).
+- [2026-10-22, M7] Background workers and one-shot migration containers disable the inherited HTTP healthcheck. Why: they run no web server, so the image healthcheck always fails and blocks `up --wait` / the deploy gate. Rejected: giving workers a fake healthcheck (meaningless).
 
 ---
 
@@ -431,7 +442,8 @@ Format: `- [YYYY-MM-DD, Mx] Decision. Why. Alternatives rejected.`
 
 - [ ] (HUMAN) Save the original assignment text as `docs/ASSIGNMENT.md`.
 - [ ] (HUMAN, M0) Send `docs/PROPOSAL.md` to reviewer/DevOps. Sent: ____ Response: ____
-- [ ] (HUMAN, M8) VPS provisioned (IP: ____), domains: `jobs.____` / `candidates.____`, A records resolving.
+- [ ] (HUMAN, M7) Add `.github/workflows/deploy.yml` (GHCR push + SSH deploy + health gate + rollback). The repo scripts it should call are in `deploy/scripts/`; the secret list is in `docs/deployment.md`.
+- [ ] (HUMAN, M8) VPS provisioned (IP: ____), domains: `jobs.____` / `candidates.____` / `app.____`, A records resolving.
 - [ ] (HUMAN, M8) GitHub environment secrets set (see `docs/deployment.md` once M7 is done): SSH key/host/user, DB passwords, JWT keys (base64 PEM), `INTERNAL_TOKEN`.
 
 ---
@@ -615,3 +627,14 @@ Template:
 - Not done / left half-way: no commit. No automated frontend test suite (manual Playwright only). M7 still next.
 - Gotchas/decisions added: modal portal for transformed ancestors; headless Chromium PDF iframe; screenshot timing vs page animation.
 - Next session should start with: M7 production Dockerfiles/compose/Caddy/CI.
+### Session 16: 2026-10-22: M7 packaging, prod stack, CI
+- Did: production packaging. Root `.dockerignore`; multi-stage Dockerfiles for both services (repo-root context, `uv` 0.11.23, `--no-editable`, non-root uid 10001, gunicorn 2x4, `urllib` healthcheck with `X-Forwarded-Proto: https`); `deploy/docker-compose.prod.yml` (caddy, frontend, kafka, both DBs, both web services, relay, consumer, reconciler, one-shot migrates; log rotation; memory caps; only Caddy publishes ports); `deploy/Caddyfile` (three env domains, `/internal/*` 404, security headers, `tls internal`/ACME); `deploy/.env.prod.example`; `deploy/scripts/{bootstrap-vps,render-env,deploy,rollback,backup-db}.sh`; `scripts/migration_check.py`; rewritten `.github/workflows/ci.yml` (no `deploy.yml` by human request); `docs/deployment.md`; `prod-local`/`prod-down`/`prod-logs` in `Makefile` and `tasks.ps1`. Added `SECURE_HSTS_SECONDS` to both service settings and made Caddy HSTS drive from `HSTS_HEADER`.
+- Verified (commands + result):
+  - `docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build --wait` -> 11/11 healthy (incl. `job-relay`, `candidate-consumer`, `candidate-reconciler`).
+  - Via Caddy: `https://jobs.localhost:8443/readyz` 200, `https://candidates.localhost:8443/readyz` 200 (`consumer: up`, `kafka: up`), `https://app.localhost:8443/` 200, `https://jobs.localhost:8443/internal/admin/outbox` 404; local HSTS header `max-age=0`.
+  - `scripts/migration_check.py --service job` and `--service candidate` -> `OK` (fresh migrate, reverse/forward latest, no drift).
+  - `./tasks.ps1 verify` -> ruff clean, format 150 files, mypy Success x3, pytest 11 + 89 + 78 = 178.
+  - `actionlint` clean; `shellcheck` clean; `docker compose config --quiet` clean; `uv lock --check` clean; secret-pattern scan clean; `render-env.sh` writes mode 600 and round-trips a quoted value in a Linux container.
+- Not done / left half-way: `deploy.yml` intentionally not created (human owns it); `deploy.sh` rollback not proven (needs GHCR tags + Linux host); real GitHub run not observed; e2e not re-run this session (prod-only changes, last green S14).
+- Gotchas/decisions added: contracts wheel built before its source is copied; worker healthchecks inherited from web image; actionlint colon in step name; Caddy HSTS poisoning; no usable `bash` on this box; decisions on `deploy.yml`, three domains, configurable HSTS, disabled worker healthchecks.
+- Next session should start with: human adds `deploy.yml`; then prove `rollback.sh` on Linux; M8 when VPS/DNS/secrets exist. Remaining M7 evidence: real GitHub CI run + rollback.

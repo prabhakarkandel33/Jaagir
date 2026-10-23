@@ -1,0 +1,48 @@
+# Production reverse proxy for the Job Portal.
+#
+# Three sites, all terminated by Caddy:
+#   {$JOB_DOMAIN}         -> job-service:3001
+#   {$CANDIDATE_DOMAIN}   -> candidate-service:3002
+#   {$FRONTEND_DOMAIN}    -> frontend static bundle (nginx:8080)
+#
+# `/internal/*` is a hard 404 at the edge (invariant I8). Services only talk to
+# each other over the private compose network.
+#
+# TLS:
+#   CADDY_TLS unset/empty -> automatic public ACME certificates
+#   CADDY_TLS=internal    -> local CA for `make prod-local`
+#   CADDY_TLS=<email>     -> automatic ACME with that account email
+#
+# Caddy sets X-Forwarded-Proto automatically, which Django uses through
+# SECURE_PROXY_SSL_HEADER to stop the HTTPS redirect loop.
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "{$HSTS_HEADER}"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	@internal path /internal /internal/*
+	respond @internal "Not Found" 404
+	encode zstd gzip
+}
+
+{$JOB_DOMAIN} {
+	tls {$CADDY_TLS}
+	import security_headers
+	reverse_proxy job-service:3001
+}
+
+{$CANDIDATE_DOMAIN} {
+	tls {$CADDY_TLS}
+	import security_headers
+	reverse_proxy candidate-service:3002
+}
+
+{$FRONTEND_DOMAIN} {
+	tls {$CADDY_TLS}
+	import security_headers
+	reverse_proxy frontend:8080
+}

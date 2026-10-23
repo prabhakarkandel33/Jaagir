@@ -1,4 +1,4 @@
-﻿# Job Portal - top-level commands (AGENTS.md section 5).
+# Job Portal - top-level commands (AGENTS.md section 5).
 # On Windows use `tasks.ps1` instead: ./tasks.ps1 <target>
 
 BACKEND  := backend
@@ -12,7 +12,8 @@ BUILD    ?=
 
 .PHONY: help sync infra-up infra-down stack-up stack-down stack-logs stack-ps \
         migrate dev dev-job dev-candidate \
-        lint typecheck test verify openapi seed explain e2e prod-local
+        lint typecheck test verify openapi seed explain e2e \
+        prod-local prod-down prod-logs
 
 help:
 	@echo "targets:"
@@ -27,7 +28,8 @@ help:
 	@echo "  seed N=100000           seed jobs for search benchmarks (M5)"
 	@echo "  explain                 EXPLAIN (ANALYZE, BUFFERS) benchmark (M5)"
 	@echo "  e2e                     outage/recovery scenarios (M6)"
-	@echo "  prod-local              prod compose behind Caddy (M7)"
+	@echo "  prod-local              prod compose behind Caddy (internal CA on 8443)"
+	@echo "  prod-down / prod-logs   stop / follow the prod stack"
 
 sync:
 	cd $(BACKEND) && uv sync --all-packages
@@ -96,5 +98,13 @@ e2e:
 	uv run --project backend python e2e/run_e2e.py
 
 prod-local:
-	@echo "make prod-local: not implemented yet (M7)"
+	@test -f deploy/.env.prod || cp deploy/.env.prod.example deploy/.env.prod
+	docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build
+	@echo "portal: https://app.localhost:8443 (internal CA; curl -k)"
+
+prod-down:
+	docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml down
+
+prod-logs:
+	docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml logs -f
 

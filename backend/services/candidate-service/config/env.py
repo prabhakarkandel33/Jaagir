@@ -49,6 +49,8 @@ class ServiceSettings(BaseSettings):
     allowed_hosts: str = "*"
     cors_allowed_origins: str = ""
     body_max_bytes: int = 1_048_576
+    # HSTS lifetime. Set 0 for a local HTTPS trial with an internal CA.
+    secure_hsts_seconds: int = 31_536_000
 
     # Resume media (M7A). Empty MEDIA_ROOT means <service>/media.
     media_root: str = ""

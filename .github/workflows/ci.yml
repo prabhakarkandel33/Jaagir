@@ -9,10 +9,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   backend:
-    name: backend (lint, types, tests)
+    name: backend (lint, types, tests, migrations)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -22,9 +26,11 @@ jobs:
           version: "0.11.23"
           enable-cache: true
 
-      - name: Sync workspace
+      - name: Sync workspace (lockfile must be current)
         working-directory: backend
-        run: uv sync --all-packages --locked
+        run: |
+          uv lock --check
+          uv sync --all-packages --locked
 
       - name: Lint and format check
         working-directory: backend
@@ -32,7 +38,7 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
-      - name: Typecheck
+      - name: Typecheck (one run per service; both define apps/config)
         working-directory: backend
         run: |
           uv run mypy packages/contracts/src
@@ -48,13 +54,36 @@ jobs:
           (cd backend/services/job-service && uv run pytest -q)
           (cd backend/services/candidate-service && uv run pytest -q)
 
+      - name: Migration check (fresh DB, reverse one step, forward)
+        run: |
+          docker compose -f deploy/docker-compose.dev.yml exec -T job-db \
+            createdb -U jobportal job_db_mig
+          docker compose -f deploy/docker-compose.dev.yml exec -T candidate-db \
+            createdb -U jobportal candidate_db_mig
+          uv run --project backend python scripts/migration_check.py \
+            backend/services/job-service postgresql://jobportal:jobportal@localhost:5433/job_db_mig
+          uv run --project backend python scripts/migration_check.py \
+            backend/services/candidate-service postgresql://jobportal:jobportal@localhost:5434/candidate_db_mig
+
+      - name: Committed migrations are immutable
+        run: |
+          git fetch --no-tags --depth=1 origin main || true
+          changed="$(git diff --name-status origin/main...HEAD -- '*/migrations/*.py' 2>/dev/null || true)"
+          modified="$(printf '%s\n' "$changed" | awk '$1 == "M" {print $2}')"
+          if [ -n "$modified" ]; then
+            echo "Committed migrations must not change (I5):"
+            echo "$modified"
+            exit 1
+          fi
+
       - name: Stop infrastructure
         if: always()
         run: docker compose -f deploy/docker-compose.dev.yml down -v
 
   frontend:
-    name: frontend (build)
+    name: frontend (typecheck, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +97,75 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  images:
+    name: images (docker build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build job-service
+        run: docker build -f backend/services/job-service/Dockerfile -t jobportal/job-service:ci .
+
+      - name: Build candidate-service
+        run: docker build -f backend/services/candidate-service/Dockerfile -t jobportal/candidate-service:ci .
+
+      - name: Build frontend
+        run: |
+          docker build -f frontend/Dockerfile \
+            --build-arg VITE_JOB_SERVICE_URL=http://localhost:3001 \
+            --build-arg VITE_CANDIDATE_SERVICE_URL=http://localhost:3002 \
+            -t jobportal/frontend:ci frontend
+
+  workflow-lint:
+    name: workflows (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:latest -color
+
+  secret-scan:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan tracked files for committed keys/tokens
+        run: |
+          if git grep -nIE \
+            'BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' \
+            -- . ':!docs/**'; then
+            echo "Possible secret committed (I6)."
+            exit 1
+          fi
+
+  e2e:
+    name: e2e outage suite (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.23"
+          enable-cache: true
+
+      - name: Sync workspace
+        working-directory: backend
+        run: uv sync --all-packages --locked
+
+      - name: Outage/recovery scenarios A-E
+        run: uv run --project backend python e2e/run_e2e.py

@@ -1,0 +1,295 @@
+# Production stack for the Job Portal (single VPS).
+#
+#   cp deploy/.env.prod.example deploy/.env.prod
+#   # fill in deploy/.env.prod (or run deploy/scripts/render-env.sh)
+#   docker compose --env-file deploy/.env.prod \
+#     -f deploy/docker-compose.prod.yml up -d --build
+#
+# Only Caddy publishes host ports. Postgres, Kafka and both Django services stay
+# on the private compose network. Every service has a memory cap and rotated
+# json-file logs (ARCHITECTURE.md sections 10-11).
+#
+# `make prod-local` / `tasks.ps1 prod-local` wraps the command above, publishes
+# Caddy on 8080/8443 and uses an internal CA (CADDY_TLS=internal).
+
+name: ${COMPOSE_PROJECT_NAME:-jobportal}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-job-env: &job-env
+  DJANGO_SETTINGS_MODULE: config.settings.prod
+  DEBUG: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS must be set}
+  SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-31536000}
+  DATABASE_URL: postgresql://${JOB_DB_USER:-jobportal}:${JOB_DB_PASSWORD}@job-db:5432/job_db
+  CORS_ALLOWED_ORIGINS: ${FRONTEND_PUBLIC_URL}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  JWT_ALGORITHM: ES256
+  JWT_ISSUER: job-service
+  JWT_SIGNING_KEY: ${JOB_JWT_SIGNING_KEY}
+  JWT_PUBLIC_KEY: ${JOB_JWT_PUBLIC_KEY}
+
+x-candidate-env: &candidate-env
+  DJANGO_SETTINGS_MODULE: config.settings.prod
+  DEBUG: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS must be set}
+  SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-31536000}
+  DATABASE_URL: postgresql://${CANDIDATE_DB_USER:-jobportal}:${CANDIDATE_DB_PASSWORD}@candidate-db:5432/candidate_db
+  CORS_ALLOWED_ORIGINS: ${FRONTEND_PUBLIC_URL}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  KAFKA_CONSUMER_GROUP_ID: candidate-service
+  MEDIA_ROOT: /app/media
+  RESUME_MAX_BYTES: 5242880
+  JOB_SERVICE_INTERNAL_URL: http://job-service:3001
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  JWT_ALGORITHM: ES256
+  JWT_ISSUER: candidate-service
+  JWT_SIGNING_KEY: ${CANDIDATE_JWT_SIGNING_KEY}
+  JWT_PUBLIC_KEY: ${CANDIDATE_JWT_PUBLIC_KEY}
+  JOB_SERVICE_JWT_PUBLIC_KEY: ${JOB_JWT_PUBLIC_KEY}
+
+x-job-image: &job-image
+  image: ${JOB_IMAGE:-jobportal/job-service}:${IMAGE_TAG:-latest}
+  build:
+    context: ..
+    dockerfile: backend/services/job-service/Dockerfile
+
+x-candidate-image: &candidate-image
+  image: ${CANDIDATE_IMAGE:-jobportal/candidate-service}:${IMAGE_TAG:-latest}
+  build:
+    context: ..
+    dockerfile: backend/services/candidate-service/Dockerfile
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      JOB_DOMAIN: ${JOB_DOMAIN}
+      CANDIDATE_DOMAIN: ${CANDIDATE_DOMAIN}
+      FRONTEND_DOMAIN: ${FRONTEND_DOMAIN}
+      CADDY_TLS: ${CADDY_TLS:-}
+      HSTS_HEADER: ${HSTS_HEADER:-max-age=31536000; includeSubDomains; preload}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      job-service:
+        condition: service_healthy
+      candidate-service:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    mem_limit: 128m
+    logging: *default-logging
+
+  kafka:
+    image: apache/kafka:3.8.1
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    mem_limit: 1g
+    logging: *default-logging
+
+  job-db:
+    image: postgres:16
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-job-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${JOB_DB_USER:-jobportal}
+      POSTGRES_PASSWORD: ${JOB_DB_PASSWORD}
+      POSTGRES_DB: job_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${JOB_DB_USER:-jobportal} -d job_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - job_db_data:/var/lib/postgresql/data
+    mem_limit: 512m
+    logging: *default-logging
+
+  candidate-db:
+    image: postgres:16
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-candidate-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CANDIDATE_DB_USER:-jobportal}
+      POSTGRES_PASSWORD: ${CANDIDATE_DB_PASSWORD}
+      POSTGRES_DB: candidate_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CANDIDATE_DB_USER:-jobportal} -d candidate_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - candidate_db_data:/var/lib/postgresql/data
+    mem_limit: 768m
+    logging: *default-logging
+
+  job-migrate:
+    <<: *job-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-job-migrate
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment: *job-env
+    depends_on:
+      job-db:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true
+    mem_limit: 384m
+    logging: *default-logging
+
+  candidate-migrate:
+    <<: *candidate-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-candidate-migrate
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment: *candidate-env
+    depends_on:
+      candidate-db:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true
+    mem_limit: 384m
+    logging: *default-logging
+
+  job-service:
+    <<: *job-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-job-service
+    restart: unless-stopped
+    environment: *job-env
+    depends_on:
+      job-migrate:
+        condition: service_completed_successfully
+    mem_limit: 400m
+    logging: *default-logging
+
+  job-relay:
+    <<: *job-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-job-relay
+    restart: unless-stopped
+    command: ["python", "manage.py", "run_relay"]
+    environment:
+      <<: *job-env
+      OUTBOX_RELAY_ENABLED: "true"
+    healthcheck:
+      disable: true
+    depends_on:
+      job-migrate:
+        condition: service_completed_successfully
+    mem_limit: 300m
+    logging: *default-logging
+
+  candidate-service:
+    <<: *candidate-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-candidate-service
+    restart: unless-stopped
+    environment: *candidate-env
+    volumes:
+      - candidate_media:/app/media
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully
+    mem_limit: 400m
+    logging: *default-logging
+
+  candidate-consumer:
+    <<: *candidate-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-candidate-consumer
+    restart: unless-stopped
+    command: ["python", "manage.py", "consume_events"]
+    environment:
+      <<: *candidate-env
+      KAFKA_CONSUMER_ENABLED: "true"
+    healthcheck:
+      disable: true
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully
+    mem_limit: 300m
+    logging: *default-logging
+
+  candidate-reconciler:
+    <<: *candidate-image
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-candidate-reconciler
+    restart: unless-stopped
+    command: ["python", "manage.py", "run_reconciler"]
+    environment:
+      <<: *candidate-env
+      RECONCILE_ENABLED: "true"
+    healthcheck:
+      disable: true
+    depends_on:
+      candidate-migrate:
+        condition: service_completed_successfully
+      job-service:
+        condition: service_healthy
+    mem_limit: 300m
+    logging: *default-logging
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-jobportal/frontend}:${IMAGE_TAG:-latest}
+    build:
+      context: ../frontend
+      args:
+        VITE_JOB_SERVICE_URL: ${JOB_PUBLIC_URL}
+        VITE_CANDIDATE_SERVICE_URL: ${CANDIDATE_PUBLIC_URL}
+    container_name: ${COMPOSE_PROJECT_NAME:-jobportal}-frontend
+    restart: unless-stopped
+    mem_limit: 128m
+    logging: *default-logging
+
+volumes:
+  caddy_data:
+  caddy_config:
+  kafka_data:
+  job_db_data:
+  candidate_db_data:
+  candidate_media:

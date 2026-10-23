@@ -35,6 +35,7 @@ flowchart LR
   C[Candidate] -->|HTTPS| CADDY
   subgraph VPS["Single VPS (docker compose)"]
     CADDY["Caddy :80/:443 (TLS, blocks /internal/*)"]
+    FRONTEND["Frontend (nginx :8080)"]
     subgraph JS["Job Service"]
       JAPI[HTTP API] --> JDB[(job_db)]
       RELAY[Outbox Relay] --> JDB
@@ -48,6 +49,7 @@ flowchart LR
   end
   CADDY -->|jobs.domain| JAPI
   CADDY -->|candidates.domain| CAPI
+  CADDY -->|app.domain| FRONTEND
   RELAY -->|produce| KAFKA
   KAFKA -->|consume| CONS
   RECON -.->|"GET /internal/jobs/snapshot (internal net)"| JAPI
@@ -286,11 +288,11 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 ## 10. Deployment & CI/CD
 
-**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `job-service` · `candidate-service` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container. The Candidate Service writes uploaded CVs to a named `candidate-media` volume mounted at `MEDIA_ROOT`; the nightly backup includes that volume (M7A).
+**Topology (single VPS):** `caddy` (only container with published ports 80/443) · `frontend` (nginx, static bundle) · `job-service` · `candidate-service` · `job-relay` · `candidate-consumer` · `candidate-reconciler` · `job-db` · `candidate-db` · `kafka`; one-shot `job-migrate` / `candidate-migrate`. Three domains from env: `jobs.*`, `candidates.*`, `app.*`. Private docker network, named volumes, `json-file` log driver (`max-size 10m`, `max-file 3`), `restart: unless-stopped`, `mem_limit` per container. The Candidate Service writes uploaded CVs to a named `candidate-media` volume mounted at `MEDIA_ROOT`; the nightly backup includes that volume (M7A).
 
-**ci.yml (PR + push):** `uv sync` -> lint + typecheck -> unit + integration tests (compose infra) -> **migration check** (for each service: fresh Postgres, `migrate`, then `migrate <app> <previous>`, then `migrate` again; fail if a committed migration file changed; verify both services migrate against *their own* DB only) -> build both Docker images (no push on PRs) -> e2e outage suite on `main`.
+**ci.yml (PR + push):** `uv lock --check` + lint + typecheck -> unit + integration tests -> **migration check** (fresh DB `migrate`, reverse the latest migration, forward again; fail if `makemigrations --check` reports drift) -> committed-migration immutability check -> frontend build -> Docker image build (no push on PRs) -> `actionlint` + secret scan -> e2e outage suite on `main`.
 
-**deploy.yml (push to `main`, after CI green, or manual):** build + push images to GHCR tagged `:<sha>` and `:latest` -> SSH to VPS -> `deploy.sh <sha>`:
+**deploy.yml (pending, human-owned):** build + push images to GHCR tagged `:<sha>` and `:latest` -> SSH to VPS -> `deploy.sh <sha>`:
 1. record current tag to `.previous_tag`
 2. `docker compose pull`
 3. run migrations (one-shot containers)
@@ -325,7 +327,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 | `job-db` Postgres (shared_buffers 256 MB) | 0.5 GB |
 | `candidate-db` Postgres (shared_buffers 256 MB; holds 100k-row FTS index) | 0.5-0.7 GB |
 | 2 Django services behind gunicorn (~200-350 MB each) | 0.7 GB |
-| Frontend build (Vite, static; served by Caddy) | 0.05 GB |
+| Frontend (Vite static bundle behind nginx) | 0.15 GB |
 | Caddy | 0.05 GB |
 | OS + Docker daemon + page cache | 0.8 GB |
 | **Subtotal** | **~3.6-4.1 GB** |
@@ -335,7 +337,7 @@ Drafts are never replicated (the snapshot and events only cover `PUBLISHED`/`CLO
 
 **Storage justification:** OS+Docker ~10 GB, images ~3 GB (keep last 3 tags), Postgres data < 3 GB at assumed scale, Kafka < 1 GB (7-day retention), CV media on the candidate volume (capped at 5 MiB per file), logs capped ~300 MB, backups ~5-10 GB, headroom for growth.
 
-**Domains / DNS:** `jobs.<domain>` and `candidates.<domain>`, `A` records to the VPS IP (and `AAAA` if IPv6). DNS must resolve **before** first deploy so Caddy can obtain Let's Encrypt certificates.
+**Domains / DNS:** `jobs.<domain>`, `candidates.<domain>` and `app.<domain>`, `A` records to the VPS IP (and `AAAA` if IPv6). DNS must resolve **before** first deploy so Caddy can obtain Let's Encrypt certificates.
 
 **Additional requirements**
 - Inbound: 22 (restricted to known IPs if possible), 80, 443. Nothing else public (no 5432, no 9092).

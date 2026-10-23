@@ -1,4 +1,4 @@
-﻿# Job Portal - top-level commands for Windows (mirror of Makefile).
+# Job Portal - top-level commands for Windows (mirror of Makefile).
 # Usage:  ./tasks.ps1 <target>   e.g.  ./tasks.ps1 infra-up
 #         ./tasks.ps1 seed -N 100000
 
@@ -39,7 +39,8 @@ targets:
   seed -N 100000          seed jobs for search benchmarks (M5)
   explain                 EXPLAIN (ANALYZE, BUFFERS) benchmark (M5)
   e2e                     outage/recovery scenarios (M6)
-  prod-local              prod compose behind Caddy (M7)
+  prod-local              prod compose behind Caddy (internal CA on 8443)
+  prod-down / prod-logs   stop / follow the prod stack
 '@ | Write-Output
 }
 
@@ -101,7 +102,16 @@ switch ($Target) {
         Invoke-In '.' { uv run --project backend python scripts/explain_analyze.py --service candidate }
     }
     'e2e' { Invoke-In '.' { uv run --project backend python e2e/run_e2e.py } }
-    'prod-local' { Write-Output 'tasks.ps1 prod-local: not implemented yet (M7)' }
+    'prod-local' {
+        if (-not (Test-Path 'deploy/.env.prod')) {
+            Copy-Item 'deploy/.env.prod.example' 'deploy/.env.prod'
+            Write-Output 'prod-local: created deploy/.env.prod from the example'
+        }
+        docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build
+        Write-Output 'portal: https://app.localhost:8443 (internal CA; curl -k)'
+    }
+    'prod-down' { docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml down }
+    'prod-logs' { docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml logs -f }
     default { Write-Output "Unknown target: $Target"; Write-Help; exit 1 }
 }
 
