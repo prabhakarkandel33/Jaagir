@@ -197,15 +197,15 @@ body[data-world="public"] :focus-visible {
   color: var(--paper);
 }
 
-.sitefoot__external {
-  font-size: 12px;
-  line-height: 1;
-  color: var(--faint);
-  transform: translateY(-1px);
+.sitefoot__github {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  transition: transform 180ms var(--ease-out);
 }
 
-.sitefoot__link:hover .sitefoot__external {
-  color: var(--paper);
+.sitefoot__link:hover .sitefoot__github {
+  transform: translateY(-1px) rotate(-6deg);
 }
 
 /* ------------------------------------------------------------- call to action */
